@@ -10,638 +10,385 @@ import 'providers/cart_provider.dart';
 import 'providers/search_provider.dart';
 import 'widgets/search_input_bar.dart';
 import 'widgets/variation_selection_dialog.dart';
+import 'widgets/cart_panel.dart';
 import 'checkout_screen.dart';
 
 final selectedCategoryProvider = StateProvider<dynamic>((ref) => null);
 
+/// Width below which the layout switches to a single-column, phone-style
+/// layout with the cart accessible via a bottom sheet.
+const double _kWideBreakpoint = 900;
 
 class PosScreen extends ConsumerWidget {
   const PosScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final productsAsync = ref.watch(productsProvider);
-    final categoriesAsync = ref.watch(categoriesProvider);
-    final exchangeRateAsync = ref.watch(currentExchangeRateProvider);
-    final selectedCategory = ref.watch(selectedCategoryProvider);
     final cartItems = ref.watch(cartProvider);
     final cartNotifier = ref.read(cartProvider.notifier);
-    final searchQuery = ref.watch(searchQueryProvider);
-    final dioClient = ref.watch(dioClientProvider);
-    final fullUri = Uri.parse(dioClient.dio.options.baseUrl);
-    final serverBaseUrl =
-        '${fullUri.scheme}://${fullUri.host}${fullUri.hasPort ? ':${fullUri.port}' : ''}';
 
-    final double? currentRate = exchangeRateAsync.when(
-      data: (rateObj) => rateObj.rate,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= _kWideBreakpoint;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('NaaviShop POS'),
+            backgroundColor: Colors.indigo,
+            foregroundColor: Colors.white,
+            actions: [
+              if (cartItems.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.delete_sweep),
+                  onPressed: cartNotifier.clear,
+                  tooltip: 'Vaciar Carrito',
+                ),
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.redAccent),
+                tooltip: 'Cerrar Sesión',
+                onPressed: () => _confirmLogout(context, ref),
+              ),
+            ],
+          ),
+          body: isWide
+              ? _WideLayout()
+              : _NarrowLayout(),
+          bottomNavigationBar:
+              isWide ? null : const _MobileCartBar(),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar Sesión'),
+        content: const Text(
+            '¿Estás seguro de que deseas salir del sistema POS?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Salir'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await ref.read(authProvider.notifier).logout();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// WIDE LAYOUT (tablet / desktop / WebView wide)
+// ─────────────────────────────────────────────────────────────
+class _WideLayout extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final exchangeRateAsync = ref.watch(currentExchangeRateProvider);
+    final currentRate = exchangeRateAsync.when(
+      data: (r) => r.rate,
       loading: () => null,
       error: (_, _) => null,
     );
 
-    void openCategoriesModal() {
-      showModalBottomSheet(
-        context: context,
-        useSafeArea: true,
-        builder: (modalContext) {
-          return Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
+      children: [
+        // Product browser takes all remaining space
+        const Expanded(
+          child: ColoredBox(
+            color: Color(0xFFF5F5F5),
+            child: _ProductBrowser(padding: EdgeInsets.all(16)),
+          ),
+        ),
+        // Fixed-width cart panel
+        Container(
+          width: 380,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(left: BorderSide(color: Colors.black12)),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: CartPanel(
+            currentRate: currentRate,
+            onCheckout: () => openCheckoutModal(context, ref, currentRate),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// NARROW LAYOUT (phones)
+// ─────────────────────────────────────────────────────────────
+class _NarrowLayout extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const ColoredBox(
+      color: Color(0xFFF5F5F5),
+      child: _ProductBrowser(padding: EdgeInsets.all(12)),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Persistent cart bar at the bottom of narrow layout
+// ─────────────────────────────────────────────────────────────
+class _MobileCartBar extends ConsumerWidget {
+  const _MobileCartBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cartItems = ref.watch(cartProvider);
+    final cartNotifier = ref.read(cartProvider.notifier);
+    final exchangeRateAsync = ref.watch(currentExchangeRateProvider);
+    final currentRate = exchangeRateAsync.when(
+      data: (r) => r.rate,
+      loading: () => null,
+      error: (_, _) => null,
+    );
+
+    if (cartItems.isEmpty) return const SizedBox.shrink();
+
+    final totalUsd = cartNotifier.subtotal;
+    final totalBs = currentRate != null ? totalUsd * currentRate : null;
+    final itemCount =
+        cartItems.fold<int>(0, (sum, i) => sum + i.quantity);
+
+    return Material(
+      color: Colors.indigo,
+      child: InkWell(
+        onTap: () => _openCartSheet(context, ref, currentRate),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
+            child: Row(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Stack(
+                  clipBehavior: Clip.none,
                   children: [
-                    const Text(
-                      'Categorías',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    const Icon(
+                      Icons.shopping_cart,
+                      color: Colors.white,
+                      size: 28,
                     ),
-                    if (selectedCategory != null)
-                      TextButton.icon(
-                        icon: const Icon(Icons.clear, size: 18),
-                        label: const Text('Limpiar filtro'),
-                        onPressed: () {
-                          ref.read(selectedCategoryProvider.notifier).state =
-                              null;
-                          Navigator.pop(modalContext);
-                        },
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          '$itemCount',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
+                    ),
                   ],
                 ),
-                const Divider(),
+                const SizedBox(width: 16),
                 Expanded(
-                  child: categoriesAsync.when(
-                    loading: () => const Center(
-                      child: CircularProgressIndicator(),
-                    ),
-                    error: (err, stack) => Center(
-                      child: Text(
-                        'Error al cargar categorías: $err',
-                        style: const TextStyle(color: Colors.red),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '\$${totalUsd.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    data: (categories) {
-                      if (categories.isEmpty) {
-                        return const Center(
-                          child: Text('No hay categorías disponibles.'),
-                        );
-                      }
+                      if (totalBs != null)
+                        Text(
+                          'Bs. ${totalBs.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.keyboard_arrow_up,
+                  color: Colors.white,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-                      return ListView.builder(
-                        itemCount: categories.length,
-                        itemBuilder: (context, index) {
-                          final category = categories[index];
-                          final isSelected =
-                              selectedCategory?.id == category.id;
-
-                          return ListTile(
-                            title: Text(category.name),
-                            selected: isSelected,
-                            selectedTileColor: Colors.indigo.shade50,
-                            trailing: isSelected
-                                ? const Icon(Icons.check_circle,
-                                    color: Colors.indigo)
-                                : null,
-                            onTap: () {
-                              ref
-                                  .read(selectedCategoryProvider.notifier)
-                                  .state = category;
-                              Navigator.pop(modalContext);
-                            },
-                          );
-                        },
-                      );
+  void _openCartSheet(
+    BuildContext context,
+    WidgetRef ref,
+    double? currentRate,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return FractionallySizedBox(
+          heightFactor: 0.85,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              children: [
+                // drag handle
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: CartPanel(
+                    currentRate: currentRate,
+                    onCheckout: () {
+                      Navigator.of(sheetContext).pop();
+                      // Open checkout once the sheet finishes popping.
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        openCheckoutModal(context, ref, currentRate);
+                      });
                     },
                   ),
                 ),
               ],
             ),
-          );
-        },
-      );
-    }
-
-    void openCheckoutModal() {
-      if (cartItems.isEmpty) return;
-
-      final orderItems = cartItems
-          .map((item) => OrderItemIn(
-                variationId: item.variationId,
-                quantity: item.quantity,
-              ))
-          .toList();
-
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        builder: (dialogContext) {
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(dialogContext).viewInsets.bottom,
-            ),
-            child: CheckoutScreen(
-              cartItems: orderItems,
-              subtotal: cartNotifier.subtotal,
-              currentRate: currentRate,
-              onSubmitOrder: (orderPayload) async {
-                try {
-                  final ordersRepo = ref.read(ordersRepositoryProvider);
-                  final result =
-                      await ordersRepo.createOrder(orderPayload.toJson());
-
-                  if (context.mounted) {
-                    Navigator.of(dialogContext).pop();
-                    cartNotifier.clear();
-                    ref.invalidate(productsProvider);
-                    final orderId = result['id'];
-                    final totalBs = result['total_bs'];
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '¡Orden #$orderId creada exitosamente! Total: Bs. ${totalBs ?? ''}',
-                        ),
-                        backgroundColor: Colors.green,
-                        duration: const Duration(seconds: 4),
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                            e.toString().replaceAll('Exception: ', '')),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-            ),
-          );
-        },
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('NaaviShop POS'),
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_sweep),
-            onPressed: cartItems.isEmpty ? null : () => cartNotifier.clear(),
-            tooltip: 'Vaciar Carrito',
           ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.redAccent),
-            tooltip: 'Cerrar Sesión',
-            onPressed: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Cerrar Sesión'),
-                  content: const Text(
-                      '¿Estás seguro de que deseas salir del sistema POS?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Cancelar'),
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Salir'),
-                    ),
-                  ],
-                ),
-              );
+        );
+      },
+    );
+  }
+}
 
-              if (confirm == true) {
-                await ref.read(authProvider.notifier).logout();
-              }
-            },
-          ),
-        ],
-      ),
-      body: Row(
+// ─────────────────────────────────────────────────────────────
+// Product browser — search bar + category + responsive grid
+// ─────────────────────────────────────────────────────────────
+class _ProductBrowser extends ConsumerWidget {
+  final EdgeInsets padding;
+  const _ProductBrowser({required this.padding});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: padding,
+      child: Column(
         children: [
-          // 1. Grid de Productos
-          Expanded(
-            flex: 7,
-            child: Container(
-              color: Colors.grey[100],
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SearchInputBar(),
-                      ),
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 18,
-                          ),
-                          backgroundColor: selectedCategory != null
-                              ? Colors.indigo
-                              : Colors.white,
-                          foregroundColor: selectedCategory != null
-                              ? Colors.white
-                              : Colors.indigo,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            side: const BorderSide(color: Colors.indigo),
-                          ),
-                          elevation: 0,
-                        ),
-                        icon: const Icon(Icons.category),
-                        label: Text(
-                          selectedCategory != null
-                              ? selectedCategory.name
-                              : 'Categorías',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: openCategoriesModal,
-                      ),
-                      if (selectedCategory != null) ...[
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.cancel, color: Colors.grey),
-                          tooltip: 'Quitar filtro de categoría',
-                          onPressed: () {
-                            ref.read(selectedCategoryProvider.notifier).state =
-                                null;
-                          },
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: productsAsync.when(
-                      loading: () => const Center(
-                        child: CircularProgressIndicator(),
-                      ),
-                      error: (err, stack) => Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Error al cargar productos: $err',
-                              style: const TextStyle(color: Colors.red),
-                            ),
-                            const SizedBox(height: 8),
-                            ElevatedButton(
-                              onPressed: () => ref.refresh(productsProvider),
-                              child: const Text('Reintentar'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      data: (products) {
-                        final query = searchQuery.toLowerCase().trim();
-                        final filteredProducts = products.where((product) {
-                          bool matchesQuery = true;
-                          if (query.isNotEmpty) {
-                            final matchesName =
-                                product.name.toLowerCase().contains(query);
-                            final matchesVariation = product.variations.any(
-                              (variation) => variation.variationType
-                                  .toLowerCase()
-                                  .contains(query),
-                            );
-                            matchesQuery = matchesName || matchesVariation;
-                          }
-
-                          bool matchesCategory = true;
-                          if (selectedCategory != null) {
-                            matchesCategory = product.categories.any(
-                              (category) => category.id == selectedCategory.id,
-                            );
-                          }
-
-                          return matchesQuery && matchesCategory;
-                        }).toList();
-
-                        if (filteredProducts.isEmpty) {
-                          return Center(
-                            child: Text(
-                              query.isEmpty && selectedCategory == null
-                                  ? 'No hay productos disponibles.'
-                                  : 'No se encontraron productos con los filtros aplicados.',
-                              style: const TextStyle(
-                                  fontSize: 16, color: Colors.grey),
-                            ),
-                          );
-                        }
-
-                        return LayoutBuilder(
-                          builder: (context, constraints) {
-                            final double width = constraints.maxWidth;
-                            int crossAxisCount = 4;
-                            double childAspectRatio = 0.75;
-
-                            if (width < 450) {
-                              crossAxisCount = 2;
-                              childAspectRatio = 0.85;
-                            } else if (width < 750) {
-                              crossAxisCount = 3;
-                              childAspectRatio = 0.8;
-                            }
-
-                            return GridView.builder(
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: crossAxisCount,
-                                childAspectRatio: childAspectRatio,
-                                crossAxisSpacing: 12,
-                                mainAxisSpacing: 12,
-                              ),
-                              itemCount: filteredProducts.length,
-                              itemBuilder: (context, index) {
-                                final product = filteredProducts[index];
-                                final double priceUsd =
-                                    (product.finalPrice as num).toDouble();
-                                final double? priceBs = currentRate != null
-                                    ? priceUsd * currentRate
-                                    : null;
-
-                                return Card(
-                                  elevation: 2,
-                                  clipBehavior: Clip.antiAlias,
-                                  child: InkWell(
-                                    onTap: () {
-                                      if (product.variations.isNotEmpty) {
-                                        showDialog(
-                                          context: context,
-                                          builder: (_) =>
-                                              VariationSelectionDialog(
-                                            product: product,
-                                            onVariationSelected:
-                                                (selectedVariation) {
-                                              cartNotifier.addProduct(
-                                                variationId:
-                                                    selectedVariation.id,
-                                                name:
-                                                    '${product.name} - ${selectedVariation.variationType}',
-                                                price: product.finalPrice,
-                                                maxStock:
-                                                    selectedVariation.stock,
-                                              );
-                                            },
-                                          ),
-                                        );
-                                      } else {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                                'Este producto no tiene variantes registradas.'),
-                                          ),
-                                        );
-                                      }
-                                    },
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Expanded(
-                                          child: ProductImageCarousel(
-                                            product: product,
-                                            baseUrl: serverBaseUrl,
-                                          ),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.all(8.0),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                product.name,
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                '\$${priceUsd.toStringAsFixed(2)}',
-                                                style: const TextStyle(
-                                                  color: Colors.green,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                              Text(
-                                                priceBs != null
-                                                    ? 'Bs. ${priceBs.toStringAsFixed(2)}'
-                                                    : 'Bs. --',
-                                                style: const TextStyle(
-                                                  color: Colors.grey,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // 2. Carrito Interactivo Lateral
-          Expanded(
-            flex: 3,
-            child: Container(
-              color: Colors.white,
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Orden Actual',
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: cartItems.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'El carrito está vacío',
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: cartItems.length,
-                            itemBuilder: (context, index) {
-                              final item = cartItems[index];
-                              final double itemPriceUsd =
-                                  (item.price as num).toDouble();
-                              final double itemSubtotalUsd =
-                                  itemPriceUsd * item.quantity;
-                              final double? itemSubtotalBs =
-                                  currentRate != null
-                                      ? itemSubtotalUsd * currentRate
-                                      : null;
-
-                              return ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  item.productName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '\$${itemPriceUsd.toStringAsFixed(2)} x ${item.quantity} = \$${itemSubtotalUsd.toStringAsFixed(2)}',
-                                    ),
-                                    Text(
-                                      itemSubtotalBs != null
-                                          ? 'Bs. ${itemSubtotalBs.toStringAsFixed(2)}'
-                                          : 'Bs. --',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(
-                                          Icons.remove_circle_outline,
-                                          size: 20),
-                                      onPressed: () => cartNotifier
-                                          .updateQuantity(
-                                              item.variationId, -1,
-                                              maxStock: item.maxStock),
-                                    ),
-                                    Text('${item.quantity}'),
-                                    IconButton(
-                                      icon: const Icon(
-                                          Icons.add_circle_outline,
-                                          size: 20),
-                                      onPressed: () => cartNotifier
-                                          .updateQuantity(
-                                              item.variationId, 1,
-                                              maxStock: item.maxStock),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                  const Divider(),
-                  _buildTotalSection(
-                    subtotal: cartNotifier.subtotal,
-                    rate: currentRate,
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: cartItems.isEmpty
-                            ? Colors.grey
-                            : Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.point_of_sale),
-                      label: const Text(
-                        'PROCESAR COBRO',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed:
-                          cartItems.isEmpty ? null : openCheckoutModal,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          const _TopBar(),
+          const SizedBox(height: 12),
+          Expanded(child: _ProductGrid()),
         ],
       ),
     );
   }
+}
 
-  Widget _buildTotalSection({
-    required double subtotal,
-    required double? rate,
-  }) {
-    final double? totalBs = rate != null ? subtotal * rate : null;
+class _TopBar extends ConsumerWidget {
+  const _TopBar();
 
-    return Column(
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedCategory = ref.watch(selectedCategoryProvider);
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+
+    return Row(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('TOTAL USD:',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Text(
-              '\$${subtotal.toStringAsFixed(2)}',
-              style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.indigo),
+        const Expanded(child: SearchInputBar()),
+        const SizedBox(width: 8),
+        if (isNarrow)
+          IconButton.filledTonal(
+            tooltip: selectedCategory?.name ?? 'Categorías',
+            icon: Badge(
+              isLabelVisible: selectedCategory != null,
+              child: const Icon(Icons.category),
             ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('TOTAL BS. (Ref):',
-                style: TextStyle(fontSize: 14, color: Colors.grey)),
-            Text(
-              totalBs != null
-                  ? 'Bs. ${totalBs.toStringAsFixed(2)}'
-                  : 'Bs. --',
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey),
+            style: IconButton.styleFrom(
+              backgroundColor: selectedCategory != null
+                  ? Colors.indigo
+                  : Colors.white,
+              foregroundColor: selectedCategory != null
+                  ? Colors.white
+                  : Colors.indigo,
+              minimumSize: const Size(48, 48),
             ),
-          ],
-        ),
-        if (rate != null) ...[
-          const SizedBox(height: 2),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              'Tasa: ${rate.toStringAsFixed(2)} Bs./USD',
-              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            onPressed: () => openCategoriesModal(context, ref),
+          )
+        else
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 16,
+              ),
+              backgroundColor: selectedCategory != null
+                  ? Colors.indigo
+                  : Colors.white,
+              foregroundColor: selectedCategory != null
+                  ? Colors.white
+                  : Colors.indigo,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: const BorderSide(color: Colors.indigo),
+              ),
+              elevation: 0,
             ),
+            icon: const Icon(Icons.category),
+            label: Text(
+              selectedCategory != null
+                  ? selectedCategory.name
+                  : 'Categorías',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            onPressed: () => openCategoriesModal(context, ref),
+          ),
+        if (selectedCategory != null && !isNarrow) ...[
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.cancel, color: Colors.grey),
+            tooltip: 'Quitar filtro de categoría',
+            onPressed: () {
+              ref.read(selectedCategoryProvider.notifier).state = null;
+            },
           ),
         ],
       ],
@@ -649,6 +396,364 @@ class PosScreen extends ConsumerWidget {
   }
 }
 
+class _ProductGrid extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final productsAsync = ref.watch(productsProvider);
+    final searchQuery = ref.watch(searchQueryProvider);
+    final selectedCategory = ref.watch(selectedCategoryProvider);
+    final exchangeRateAsync = ref.watch(currentExchangeRateProvider);
+    final dioClient = ref.watch(dioClientProvider);
+
+    final fullUri = Uri.parse(dioClient.dio.options.baseUrl);
+    final serverBaseUrl =
+        '${fullUri.scheme}://${fullUri.host}${fullUri.hasPort ? ':${fullUri.port}' : ''}';
+
+    final currentRate = exchangeRateAsync.when(
+      data: (r) => r.rate,
+      loading: () => null,
+      error: (_, _) => null,
+    );
+
+    return productsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Error al cargar productos: $err',
+              style: const TextStyle(color: Colors.red),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () => ref.refresh(productsProvider),
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      ),
+      data: (products) {
+        final query = searchQuery.toLowerCase().trim();
+        final filtered = products.where((product) {
+          bool matchesQuery = true;
+          if (query.isNotEmpty) {
+            final matchesName =
+                product.name.toLowerCase().contains(query);
+            final matchesVariation = product.variations.any(
+              (v) => v.variationType.toLowerCase().contains(query),
+            );
+            matchesQuery = matchesName || matchesVariation;
+          }
+
+          bool matchesCategory = true;
+          if (selectedCategory != null) {
+            matchesCategory = product.categories.any(
+              (c) => c.id == selectedCategory.id,
+            );
+          }
+
+          return matchesQuery && matchesCategory;
+        }).toList();
+
+        if (filtered.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                query.isEmpty && selectedCategory == null
+                    ? 'No hay productos disponibles.'
+                    : 'No se encontraron productos con los filtros aplicados.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            ),
+          );
+        }
+
+        return GridView.builder(
+          padding: EdgeInsets.zero,
+          // Auto-computes column count from available width. Cards never
+          // get wider than ~200dp, so on a 360dp phone you get 2 columns;
+          // on a 1200dp desktop you get ~6, without a single manual
+          // breakpoint.
+          gridDelegate:
+              const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 200,
+            childAspectRatio: 0.72,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+          ),
+          itemCount: filtered.length,
+          itemBuilder: (context, index) {
+            final product = filtered[index];
+            final double priceUsd =
+                (product.finalPrice as num).toDouble();
+            final double? priceBs = currentRate != null
+                ? priceUsd * currentRate
+                : null;
+
+            return Card(
+              elevation: 2,
+              clipBehavior: Clip.antiAlias,
+              margin: EdgeInsets.zero,
+              child: InkWell(
+                onTap: () => _onProductTap(context, ref, product),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: ProductImageCarousel(
+                        product: product,
+                        baseUrl: serverBaseUrl,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            product.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '\$${priceUsd.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            priceBs != null
+                                ? 'Bs. ${priceBs.toStringAsFixed(2)}'
+                                : 'Bs. --',
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _onProductTap(BuildContext context, WidgetRef ref, dynamic product) {
+    final cartNotifier = ref.read(cartProvider.notifier);
+
+    if (product.variations.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Este producto no tiene variantes registradas.'),
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (_) => VariationSelectionDialog(
+        product: product,
+        onVariationSelected: (selectedVariation) {
+          cartNotifier.addProduct(
+            variationId: selectedVariation.id,
+            name:
+                '${product.name} - ${selectedVariation.variationType}',
+            price: product.finalPrice,
+            maxStock: selectedVariation.stock,
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Categories bottom sheet
+// ─────────────────────────────────────────────────────────────
+void openCategoriesModal(BuildContext context, WidgetRef ref) {
+  final selectedCategory = ref.read(selectedCategoryProvider);
+  final categoriesAsync = ref.read(categoriesProvider);
+
+  showModalBottomSheet(
+    context: context,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (modalContext) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Categorías',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (selectedCategory != null)
+                  TextButton.icon(
+                    icon: const Icon(Icons.clear, size: 18),
+                    label: const Text('Limpiar filtro'),
+                    onPressed: () {
+                      ref
+                          .read(selectedCategoryProvider.notifier)
+                          .state = null;
+                      Navigator.pop(modalContext);
+                    },
+                  ),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: categoriesAsync.when(
+                loading: () => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+                error: (err, _) => Center(
+                  child: Text(
+                    'Error al cargar categorías: $err',
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+                data: (categories) {
+                  if (categories.isEmpty) {
+                    return const Center(
+                      child: Text('No hay categorías disponibles.'),
+                    );
+                  }
+                  return ListView.builder(
+                    itemCount: categories.length,
+                    itemBuilder: (context, index) {
+                      final category = categories[index];
+                      final isSelected =
+                          selectedCategory?.id == category.id;
+
+                      return ListTile(
+                        title: Text(category.name),
+                        selected: isSelected,
+                        selectedTileColor: Colors.indigo.shade50,
+                        trailing: isSelected
+                            ? const Icon(
+                                Icons.check_circle,
+                                color: Colors.indigo,
+                              )
+                            : null,
+                        onTap: () {
+                          ref
+                              .read(selectedCategoryProvider.notifier)
+                              .state = category;
+                          Navigator.pop(modalContext);
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Checkout bottom sheet (shared by both layouts)
+// ─────────────────────────────────────────────────────────────
+void openCheckoutModal(
+  BuildContext context,
+  WidgetRef ref,
+  double? currentRate,
+) {
+  final cartItems = ref.read(cartProvider);
+  final cartNotifier = ref.read(cartProvider.notifier);
+  if (cartItems.isEmpty) return;
+
+  final orderItems = cartItems
+      .map((item) => OrderItemIn(
+            variationId: item.variationId,
+            quantity: item.quantity,
+          ))
+      .toList();
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (dialogContext) {
+      return Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(dialogContext).viewInsets.bottom,
+        ),
+        child: CheckoutScreen(
+          cartItems: orderItems,
+          subtotal: cartNotifier.subtotal,
+          currentRate: currentRate,
+          onSubmitOrder: (orderPayload) async {
+            try {
+              final ordersRepo = ref.read(ordersRepositoryProvider);
+              final result =
+                  await ordersRepo.createOrder(orderPayload.toJson());
+
+              if (context.mounted) {
+                Navigator.of(dialogContext).pop();
+                cartNotifier.clear();
+                ref.invalidate(productsProvider);
+                final orderId = result['id'];
+                final totalBs = result['total_bs'];
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '¡Orden #$orderId creada exitosamente! Total: Bs. ${totalBs ?? ''}',
+                    ),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      e.toString().replaceAll('Exception: ', ''),
+                    ),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            }
+          },
+        ),
+      );
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Product image carousel (unchanged, kept here for brevity)
+// ─────────────────────────────────────────────────────────────
 class ProductImageCarousel extends StatefulWidget {
   final dynamic product;
   final String baseUrl;
@@ -660,7 +765,8 @@ class ProductImageCarousel extends StatefulWidget {
   });
 
   @override
-  State<ProductImageCarousel> createState() => _ProductImageCarouselState();
+  State<ProductImageCarousel> createState() =>
+      _ProductImageCarouselState();
 }
 
 class _ProductImageCarouselState extends State<ProductImageCarousel> {
@@ -669,7 +775,8 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
 
   List<String> _getImageUrls() {
     final List<String> urls = [];
-    if (widget.product.images != null && widget.product.images.isNotEmpty) {
+    if (widget.product.images != null &&
+        widget.product.images.isNotEmpty) {
       for (final img in widget.product.images) {
         final path = img.imageUrl ?? img.url;
         if (path != null) {
@@ -706,7 +813,11 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
       return Container(
         color: Colors.indigo.shade50,
         child: const Center(
-          child: Icon(Icons.inventory_2, color: Colors.indigo, size: 40),
+          child: Icon(
+            Icons.inventory_2,
+            color: Colors.indigo,
+            size: 40,
+          ),
         ),
       );
     }
@@ -719,16 +830,17 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
             controller: _pageController,
             itemCount: imageUrls.length,
             onPageChanged: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
+              setState(() => _currentIndex = index);
             },
             itemBuilder: (context, index) {
               return Image.network(
                 imageUrls[index],
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => const Center(
-                  child: Icon(Icons.image_not_supported, color: Colors.grey),
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.image_not_supported,
+                    color: Colors.grey,
+                  ),
                 ),
               );
             },
@@ -745,11 +857,16 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
                     shape: const CircleBorder(),
                     clipBehavior: Clip.antiAlias,
                     child: IconButton(
-                      icon: const Icon(Icons.chevron_left,
-                          color: Colors.white, size: 20),
+                      icon: const Icon(
+                        Icons.chevron_left,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                       padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 28, minHeight: 28),
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
                       onPressed: () {
                         _pageController.previousPage(
                           duration: const Duration(milliseconds: 250),
@@ -771,11 +888,16 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
                     shape: const CircleBorder(),
                     clipBehavior: Clip.antiAlias,
                     child: IconButton(
-                      icon: const Icon(Icons.chevron_right,
-                          color: Colors.white, size: 20),
+                      icon: const Icon(
+                        Icons.chevron_right,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                       padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 28, minHeight: 28),
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
                       onPressed: () {
                         _pageController.nextPage(
                           duration: const Duration(milliseconds: 250),
