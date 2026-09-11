@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/auth_repository.dart';
 import '../../domain/auth_model.dart';
+import '../../../../core/config/app_config.dart';
 
 class AuthState {
   final bool isLoading;
@@ -23,7 +24,7 @@ class AuthNotifier extends Notifier<AuthState> {
   AuthState build() {
     final baseDio = Dio(
       BaseOptions(
-        baseUrl: 'http://127.0.0.1:8000/api/v1',
+        baseUrl: AppConfig.baseUrl,
         connectTimeout: const Duration(seconds: 30),
         receiveTimeout: const Duration(seconds: 30),
       ),

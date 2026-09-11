@@ -5,23 +5,15 @@ import '../../auth/presentation/providers/auth_provider.dart';
 import '../../catalog/presentation/providers/catalog_provider.dart';
 import '../data/models/create_order_dto.dart';
 import '../data/orders_repository.dart';
-import 'checkout_screen.dart';
+import '../data/models/exchange_rate.dart';
 import 'providers/cart_provider.dart';
+import 'providers/search_provider.dart';
+import 'widgets/search_input_bar.dart';
 import 'widgets/variation_selection_dialog.dart';
+import 'checkout_screen.dart';
 
-class SearchQueryNotifier extends Notifier<String> {
-  @override
-  String build() => '';
-
-  void update(String value) => state = value;
-  void clear() => state = '';
-}
-
-final searchQueryProvider =
-    NotifierProvider<SearchQueryNotifier, String>(SearchQueryNotifier.new);
-
-// Provider para gestionar la categoría seleccionada actualmente
 final selectedCategoryProvider = StateProvider<dynamic>((ref) => null);
+
 
 class PosScreen extends ConsumerWidget {
   const PosScreen({super.key});
@@ -30,18 +22,22 @@ class PosScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final productsAsync = ref.watch(productsProvider);
     final categoriesAsync = ref.watch(categoriesProvider);
+    final exchangeRateAsync = ref.watch(currentExchangeRateProvider);
     final selectedCategory = ref.watch(selectedCategoryProvider);
     final cartItems = ref.watch(cartProvider);
     final cartNotifier = ref.read(cartProvider.notifier);
     final searchQuery = ref.watch(searchQueryProvider);
-
-    // Lectura del cliente Dio para construir la URL base de imágenes
     final dioClient = ref.watch(dioClientProvider);
     final fullUri = Uri.parse(dioClient.dio.options.baseUrl);
     final serverBaseUrl =
         '${fullUri.scheme}://${fullUri.host}${fullUri.hasPort ? ':${fullUri.port}' : ''}';
 
-    // Abrir Modal de Categorías
+    final double? currentRate = exchangeRateAsync.when(
+      data: (rateObj) => rateObj.rate,
+      loading: () => null,
+      error: (_, _) => null,
+    );
+
     void openCategoriesModal() {
       showModalBottomSheet(
         context: context,
@@ -125,7 +121,6 @@ class PosScreen extends ConsumerWidget {
       );
     }
 
-    // Abrir Modal de Checkout para Cobrar
     void openCheckoutModal() {
       if (cartItems.isEmpty) return;
 
@@ -148,6 +143,7 @@ class PosScreen extends ConsumerWidget {
             child: CheckoutScreen(
               cartItems: orderItems,
               subtotal: cartNotifier.subtotal,
+              currentRate: currentRate,
               onSubmitOrder: (orderPayload) async {
                 try {
                   final ordersRepo = ref.read(ordersRepositoryProvider);
@@ -245,32 +241,7 @@ class PosScreen extends ConsumerWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          onChanged: (value) {
-                            ref
-                                .read(searchQueryProvider.notifier)
-                                .update(value);
-                          },
-                          decoration: InputDecoration(
-                            hintText: 'Buscar producto por nombre o variante...',
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear),
-                                    onPressed: () {
-                                      ref
-                                          .read(searchQueryProvider.notifier)
-                                          .clear();
-                                    },
-                                  )
-                                : null,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                        ),
+                        child: SearchInputBar(),
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton.icon(
@@ -338,17 +309,18 @@ class PosScreen extends ConsumerWidget {
                       data: (products) {
                         final query = searchQuery.toLowerCase().trim();
                         final filteredProducts = products.where((product) {
-                          // 1. Text Search Filter
                           bool matchesQuery = true;
                           if (query.isNotEmpty) {
-                            final matchesName = product.name.toLowerCase().contains(query);
+                            final matchesName =
+                                product.name.toLowerCase().contains(query);
                             final matchesVariation = product.variations.any(
-                              (variation) => variation.variationType.toLowerCase().contains(query),
+                              (variation) => variation.variationType
+                                  .toLowerCase()
+                                  .contains(query),
                             );
                             matchesQuery = matchesName || matchesVariation;
                           }
 
-                          // 2. Category List Filter
                           bool matchesCategory = true;
                           if (selectedCategory != null) {
                             matchesCategory = product.categories.any(
@@ -371,87 +343,122 @@ class PosScreen extends ConsumerWidget {
                           );
                         }
 
-                        return GridView.builder(
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            childAspectRatio: 0.8,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                          ),
-                          itemCount: filteredProducts.length,
-                          itemBuilder: (context, index) {
-                            final product = filteredProducts[index];
+                        return LayoutBuilder(
+                          builder: (context, constraints) {
+                            final double width = constraints.maxWidth;
+                            int crossAxisCount = 4;
+                            double childAspectRatio = 0.75;
 
-                            return Card(
-                              elevation: 2,
-                              clipBehavior: Clip.antiAlias,
-                              child: InkWell(
-                                onTap: () {
-                                  if (product.variations.isNotEmpty) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (_) => VariationSelectionDialog(
-                                        product: product,
-                                        onVariationSelected:
-                                            (selectedVariation) {
-                                          cartNotifier.addProduct(
-                                            variationId: selectedVariation.id,
-                                            name:
-                                                '${product.name} - ${selectedVariation.variationType}',
-                                            price: product.finalPrice,
-                                            maxStock: selectedVariation.stock,
-                                          );
-                                        },
-                                      ),
-                                    );
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                            'Este producto no tiene variantes registradas.'),
-                                      ),
-                                    );
-                                  }
-                                },
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Expanded(
-                                      child: ProductImageCarousel(
-                                        product: product,
-                                        baseUrl: serverBaseUrl,
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            product.name,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            '\$${product.finalPrice.toStringAsFixed(2)}',
-                                            style: const TextStyle(
-                                              color: Colors.green,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                            if (width < 450) {
+                              crossAxisCount = 2;
+                              childAspectRatio = 0.85;
+                            } else if (width < 750) {
+                              crossAxisCount = 3;
+                              childAspectRatio = 0.8;
+                            }
+
+                            return GridView.builder(
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                childAspectRatio: childAspectRatio,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
                               ),
+                              itemCount: filteredProducts.length,
+                              itemBuilder: (context, index) {
+                                final product = filteredProducts[index];
+                                final double priceUsd =
+                                    (product.finalPrice as num).toDouble();
+                                final double? priceBs = currentRate != null
+                                    ? priceUsd * currentRate
+                                    : null;
+
+                                return Card(
+                                  elevation: 2,
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InkWell(
+                                    onTap: () {
+                                      if (product.variations.isNotEmpty) {
+                                        showDialog(
+                                          context: context,
+                                          builder: (_) =>
+                                              VariationSelectionDialog(
+                                            product: product,
+                                            onVariationSelected:
+                                                (selectedVariation) {
+                                              cartNotifier.addProduct(
+                                                variationId:
+                                                    selectedVariation.id,
+                                                name:
+                                                    '${product.name} - ${selectedVariation.variationType}',
+                                                price: product.finalPrice,
+                                                maxStock:
+                                                    selectedVariation.stock,
+                                              );
+                                            },
+                                          ),
+                                        );
+                                      } else {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                                'Este producto no tiene variantes registradas.'),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Expanded(
+                                          child: ProductImageCarousel(
+                                            product: product,
+                                            baseUrl: serverBaseUrl,
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.all(8.0),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                product.name,
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '\$${priceUsd.toStringAsFixed(2)}',
+                                                style: const TextStyle(
+                                                  color: Colors.green,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              Text(
+                                                priceBs != null
+                                                    ? 'Bs. ${priceBs.toStringAsFixed(2)}'
+                                                    : 'Bs. --',
+                                                style: const TextStyle(
+                                                  color: Colors.grey,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
                             );
                           },
                         );
@@ -474,8 +481,8 @@ class PosScreen extends ConsumerWidget {
                 children: [
                   const Text(
                     'Orden Actual',
-                    style: TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold),
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const Divider(),
                   Expanded(
@@ -490,6 +497,15 @@ class PosScreen extends ConsumerWidget {
                             itemCount: cartItems.length,
                             itemBuilder: (context, index) {
                               final item = cartItems[index];
+                              final double itemPriceUsd =
+                                  (item.price as num).toDouble();
+                              final double itemSubtotalUsd =
+                                  itemPriceUsd * item.quantity;
+                              final double? itemSubtotalBs =
+                                  currentRate != null
+                                      ? itemSubtotalUsd * currentRate
+                                      : null;
+
                               return ListTile(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
@@ -498,8 +514,23 @@ class PosScreen extends ConsumerWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                subtitle: Text(
-                                  '\$${item.price.toStringAsFixed(2)} x ${item.quantity}',
+                                subtitle: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '\$${itemPriceUsd.toStringAsFixed(2)} x ${item.quantity} = \$${itemSubtotalUsd.toStringAsFixed(2)}',
+                                    ),
+                                    Text(
+                                      itemSubtotalBs != null
+                                          ? 'Bs. ${itemSubtotalBs.toStringAsFixed(2)}'
+                                          : 'Bs. --',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -530,7 +561,10 @@ class PosScreen extends ConsumerWidget {
                           ),
                   ),
                   const Divider(),
-                  _buildTotalSection(subtotal: cartNotifier.subtotal),
+                  _buildTotalSection(
+                    subtotal: cartNotifier.subtotal,
+                    rate: currentRate,
+                  ),
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
@@ -561,23 +595,55 @@ class PosScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildTotalSection({required double subtotal}) {
+  Widget _buildTotalSection({
+    required double subtotal,
+    required double? rate,
+  }) {
+    final double? totalBs = rate != null ? subtotal * rate : null;
+
     return Column(
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text('TOTAL USD:',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Text(
               '\$${subtotal.toStringAsFixed(2)}',
               style: const TextStyle(
-                  fontSize: 18,
+                  fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.indigo),
             ),
           ],
         ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('TOTAL BS. (Ref):',
+                style: TextStyle(fontSize: 14, color: Colors.grey)),
+            Text(
+              totalBs != null
+                  ? 'Bs. ${totalBs.toStringAsFixed(2)}'
+                  : 'Bs. --',
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey),
+            ),
+          ],
+        ),
+        if (rate != null) ...[
+          const SizedBox(height: 2),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              'Tasa: ${rate.toStringAsFixed(2)} Bs./USD',
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -720,28 +786,6 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
                   ),
                 ),
               ),
-            Positioned(
-              bottom: 4,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                  imageUrls.length,
-                  (index) => Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _currentIndex == index
-                          ? Colors.white
-                          : Colors.white54,
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ],
         ],
       ),

@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/auth/domain/auth_model.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
+import '../config/app_config.dart';
 
 class DioClient {
   final Dio dio;
@@ -9,7 +10,7 @@ class DioClient {
   DioClient(Ref ref)
       : dio = Dio(
           BaseOptions(
-            baseUrl: 'http://localhost:8000/api/v1',
+            baseUrl: AppConfig.baseUrl,
             connectTimeout: const Duration(seconds: 10),
             receiveTimeout: const Duration(seconds: 10),
             headers: {'Content-Type': 'application/json'},

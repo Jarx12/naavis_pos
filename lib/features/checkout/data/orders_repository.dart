@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../../auth/presentation/providers/auth_provider.dart';
+import '../domain/coupon_validation_result.dart';
 
 class OrdersRepository {
   final Dio dio;
@@ -11,12 +11,11 @@ class OrdersRepository {
   Future<Map<String, dynamic>> createOrder(Map<String, dynamic> orderPayload) async {
     try {
       final response = await dio.post('/orders', data: orderPayload);
-      
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       if (e.response != null && e.response?.data is Map) {
         final errorData = e.response?.data as Map<String, dynamic>;
-        
+
         if (errorData.containsKey('detail')) {
           final detail = errorData['detail'];
           if (detail is List) {
@@ -31,9 +30,33 @@ class OrdersRepository {
       throw Exception('Error inesperado: $e');
     }
   }
+
+  Future<CouponValidationResult> validateCoupon({
+    required String code,
+    required double cartTotal,
+  }) async {
+    try {
+      final response = await dio.post(
+        '/coupons/validate',
+        data: {
+          'code': code,
+          'cart_total': cartTotal,
+        },
+      );
+      return CouponValidationResult.fromJson(response.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      if (e.response != null && e.response?.data is Map) {
+        final errorData = e.response?.data as Map<String, dynamic>;
+        if (errorData.containsKey('detail')) {
+          throw Exception(errorData['detail'].toString());
+        }
+      }
+      throw Exception('Error al validar el cupón: ${e.message}');
+    }
+  }
 }
 
-// Declaración del provider para ser consumido en pos_screen.dart
+// Declaración del provider para ser consumido en la app
 final ordersRepositoryProvider = Provider<OrdersRepository>((ref) {
   final dioClient = ref.watch(dioClientProvider);
   return OrdersRepository(dioClient.dio);
