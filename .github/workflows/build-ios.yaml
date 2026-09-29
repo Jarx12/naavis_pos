@@ -22,7 +22,7 @@ jobs:
 
       - name: Compilar App (sin firmar)
         
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign --dart-define=BASE_URL=${{ secrets.BASE_URL }}
 
       - name: Empaquetar en IPA
         run: |
