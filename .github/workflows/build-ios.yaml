@@ -1,0 +1,37 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  build-ipa:
+    name: 🎉 Compilar IPA
+    runs-on: macos-latest 
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Compilar App (sin firmar)
+        
+        run: flutter build ios --release --no-codesign
+
+      - name: Empaquetar en IPA
+        run: |
+          mkdir Payload          
+          mv build/ios/iphoneos/Runner.app Payload/
+          zip -r FlutterIpaExport.ipa Payload
+
+      - name: Subir archivo IPA como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-app-unsigned-ipa
+          path: FlutterIpaExport.ipa

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../checkout/presentation/pos_screen.dart';
 import 'providers/auth_provider.dart';
+import 'widgets/force_update_button.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -13,12 +14,14 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _passwordFocusNode = FocusNode();
   final _formKey = GlobalKey<FormState>();
 
   @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -78,6 +81,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ],
                   TextFormField(
                     controller: _usernameController,
+                    // Salta a la contraseña con la tecla del teclado en vez de
+                    // tener que cerrarlo a mano.
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) => _passwordFocusNode.requestFocus(),
                     decoration: const InputDecoration(
                       labelText: 'Usuario',
                       prefixIcon: Icon(Icons.person),
@@ -89,7 +96,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: _passwordController,
+                    focusNode: _passwordFocusNode,
                     obscureText: true,
+                    // "Listo" en el teclado envia el formulario directamente.
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _submit(),
                     decoration: const InputDecoration(
                       labelText: 'Contraseña',
                       prefixIcon: Icon(Icons.lock),
@@ -112,6 +123,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           : const Text('INGRESAR AL SISTEMA', style: TextStyle(fontSize: 16)),
                     ),
                   ),
+                  // Escape hatch for the installed web app: clears the service
+                  // worker + Cache Storage and reloads the newest build. Only
+                  // renders on web; a no-op SizedBox elsewhere.
+                  const SizedBox(height: 8),
+                  const ForceUpdateButton(),
                 ],
               ),
             ),

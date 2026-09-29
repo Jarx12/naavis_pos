@@ -27,6 +27,11 @@ class PosScreen extends ConsumerWidget {
     final cartItems = ref.watch(cartProvider);
     final cartNotifier = ref.read(cartProvider.notifier);
 
+    // Mientras se recarga el catálogo el botón muestra un spinner y se
+    // deshabilita, para no disparar varias peticiones seguidas.
+    final isRefreshing =
+        ref.watch(productsProvider.select((value) => value.isLoading));
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= _kWideBreakpoint;
@@ -37,6 +42,21 @@ class PosScreen extends ConsumerWidget {
             backgroundColor: Colors.indigo,
             foregroundColor: Colors.white,
             actions: [
+              IconButton(
+                icon: isRefreshing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.refresh),
+                tooltip: 'Actualizar catálogo',
+                onPressed:
+                    isRefreshing ? null : () => _refreshCatalog(context, ref),
+              ),
               if (cartItems.isNotEmpty)
                 IconButton(
                   icon: const Icon(Icons.delete_sweep),
@@ -58,6 +78,33 @@ class PosScreen extends ConsumerWidget {
         );
       },
     );
+  }
+
+  /// Vuelve a pedir productos, categorías y tasa de cambio.
+  ///
+  /// No se toca el carrito (la orden en curso debe sobrevivir) ni la búsqueda o
+  /// la categoría seleccionada, porque son estado local del cliente y el
+  /// filtrado de productos se hace en memoria sobre la lista recargada.
+  Future<void> _refreshCatalog(BuildContext context, WidgetRef ref) async {
+    ref
+      ..invalidate(productsProvider)
+      ..invalidate(categoriesProvider)
+      ..invalidate(currentExchangeRateProvider);
+
+    try {
+      // Espera a la recarga para poder confirmar el resultado al usuario.
+      await ref.read(productsProvider.future);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Catálogo actualizado'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      // El error ya se muestra en el cuerpo de la pantalla; no se duplica.
+    }
   }
 
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
@@ -701,6 +748,13 @@ void openCheckoutModal(
     isScrollControlled: true,
     useSafeArea: true,
     builder: (dialogContext) {
+      // La hoja modal está anclada al BORDE INFERIOR de la pantalla, así que el
+      // inset del teclado hay que aplicarlo AQUÍ (una sola vez) para que la
+      // hoja crezca y quede por encima del teclado en vez de tapada por él.
+      //
+      // Por eso `CheckoutScreen` va con `resizeToAvoidBottomInset: false`: si
+      // el `Scaffold` también descontara el teclado, se contaría dos veces y
+      // quedaría un área en blanco del tamaño del teclado tapando los campos.
       return Padding(
         padding: EdgeInsets.only(
           bottom: MediaQuery.of(dialogContext).viewInsets.bottom,

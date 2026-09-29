@@ -28,7 +28,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   final _customerNameCtrl = TextEditingController();
   final _paymentRefCtrl = TextEditingController();
   final _couponCodeCtrl = TextEditingController();
-  final _discountVolumenCtrl = TextEditingController(text: '0.0');
+  final _discountVolumenCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
 
   // Coupon state
@@ -76,6 +76,81 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   double get _totalDiscount => _volumenDiscount + _couponDiscount;
   double get _calculatedTotal =>
       (widget.subtotal - _totalDiscount).clamp(0.0, double.infinity);
+
+  /// Descuentos rápidos expresados como fracción del subtotal.
+  static const List<double> _quickDiscountFractions = [0.10, 0.20, 0.30];
+
+  /// Aplica un descuento rápido del subtotal al campo "Desc. Volumen".
+  void _applyQuickDiscount(double fraction) {
+    final amount = widget.subtotal * fraction;
+    _discountVolumenCtrl.text = amount.toStringAsFixed(2);
+    setState(() {});
+  }
+
+  /// Limpia el descuento por volumen introducido.
+  void _clearVolumeDiscount() {
+    _discountVolumenCtrl.clear();
+    setState(() {});
+  }
+
+  /// Fila de botones rápidos (10% / 20% / 30%) con el monto que aplican,
+  /// más un botón para limpiar el descuento.
+  Widget _buildQuickDiscountButtons() {
+    final current = _volumenDiscount;
+
+    Widget button(double fraction) {
+      final amount = widget.subtotal * fraction;
+      final selected = (current - amount).abs() < 0.005;
+      final scheme = Theme.of(context).colorScheme;
+
+      return OutlinedButton(
+        onPressed: () => _applyQuickDiscount(fraction),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          backgroundColor: selected ? scheme.primaryContainer : null,
+          foregroundColor:
+              selected ? scheme.onPrimaryContainer : scheme.onSurface,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${(fraction * 100).toStringAsFixed(0)}%',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            Text(
+              '\$${amount.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 10),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        for (final fraction in _quickDiscountFractions) ...[
+          Expanded(child: button(fraction)),
+          const SizedBox(width: 8),
+        ],
+        // Limpia el descuento actual. Se deshabilita si no hay nada que limpiar.
+        OutlinedButton.icon(
+          onPressed: current > 0 ? _clearVolumeDiscount : null,
+          icon: const Icon(Icons.close, size: 16),
+          label: const Text(
+            'Limpiar',
+            style: TextStyle(fontSize: 12),
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+        ),
+      ],
+    );
+  }
 
   Future<void> _validateCoupon() async {
     final code = _couponCodeCtrl.text.trim();
@@ -149,11 +224,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Height of the on-screen keyboard (0 when closed).
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-
     return Scaffold(
-      resizeToAvoidBottomInset: true,
+      // El inset del teclado se aplica UNA sola vez, en el `Padding` de
+      // `showModalBottomSheet` (ver `PosScreen.openCheckoutModal`): la hoja
+      // modal está anclada al borde inferior, así que necesita crecer para
+      // quedar por encima del teclado.
+      //
+      // Si además este `Scaffold` lo descontara, se contaría dos veces y
+      // quedaría un área en blanco del tamaño del teclado tapando los campos.
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Completar Cobro'),
       ),
@@ -168,9 +247,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               child: Form(
                 key: _formKey,
                 child: ListView(
-                  // Extra bottom padding so the last field can scroll above
-                  // the keyboard instead of being hidden behind it.
-                  padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+                  // Padding fijo: el teclado NO se cuenta aquí. El inset se
+                  // aplica una sola vez en el `Padding` de
+                  // `showModalBottomSheet` (ver `PosScreen.openCheckoutModal`),
+                  // y la lista hace scroll para mantener visible el campo
+                  // enfocado.
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
                   children: [
@@ -343,9 +425,31 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           ],
                           decoration: const InputDecoration(
                             labelText: 'Desc. Volumen (\$)',
+                            // "0.0" es solo un ejemplo (hint), no texto real:
+                            // el campo arranca vacío para que el usuario pueda
+                            // escribir su valor de inmediato sin borrar nada.
+                            hintText: '0.0',
                             border: OutlineInputBorder(),
                           ),
+                          // Al enfocar se selecciona todo el contenido para
+                          // poder sobrescribirlo escribiendo directamente.
+                          onTap: () => _discountVolumenCtrl.selection =
+                              const TextSelection(
+                                baseOffset: 0,
+                                extentOffset: 9999,
+                              ),
                           onChanged: (_) => setState(() {}),
+                        );
+
+                        // Campo + botones rápidos de descuento por volumen.
+                        final volumeSection = Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            volumeField,
+                            const SizedBox(height: 6),
+                            _buildQuickDiscountButtons(),
+                          ],
                         );
 
                         if (isNarrow) {
@@ -354,7 +458,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                             children: [
                               couponField,
                               const SizedBox(height: 12),
-                              volumeField,
+                              volumeSection,
                             ],
                           );
                         }
@@ -364,7 +468,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           children: [
                             Expanded(child: couponField),
                             const SizedBox(width: 8),
-                            Expanded(child: volumeField),
+                            Expanded(child: volumeSection),
                           ],
                         );
                       },
