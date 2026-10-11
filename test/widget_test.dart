@@ -1,51 +1,85 @@
 import 'package:dio/dio.dart';
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:naavis_pos/core/db/app_database.dart';
+import 'package:naavis_pos/core/db/app_providers.dart';
+import 'package:naavis_pos/core/images/catalog_image.dart';
 import 'package:naavis_pos/features/auth/data/auth_repository.dart';
-import 'package:naavis_pos/features/catalog/data/catalog_repository.dart';
 import 'package:naavis_pos/features/catalog/domain/category_model.dart';
 import 'package:naavis_pos/features/catalog/domain/product_model.dart';
 import 'package:naavis_pos/features/catalog/presentation/providers/catalog_provider.dart';
 import 'package:naavis_pos/features/checkout/data/models/create_order_dto.dart';
 import 'package:naavis_pos/features/checkout/data/models/exchange_rate.dart';
+import 'package:naavis_pos/features/checkout/data/outbox_service.dart';
 import 'package:naavis_pos/features/checkout/domain/cart_item_model.dart';
 import 'package:naavis_pos/features/checkout/presentation/checkout_screen.dart';
 import 'package:naavis_pos/features/checkout/presentation/pos_screen.dart';
 import 'package:naavis_pos/features/checkout/presentation/providers/cart_provider.dart';
 import 'package:naavis_pos/features/checkout/presentation/widgets/cart_panel.dart';
+import 'package:naavis_pos/features/sync/data/sync_service.dart';
 
-/// Repositorio de catálogo falso: cuenta cuántas veces se piden productos.
-class _FakeCatalogRepository implements CatalogRepository {
-  _FakeCatalogRepository(this.onGetProducts);
-
-  final void Function() onGetProducts;
+/// Sync falsa para el POS: la UI ahora lee de la base local, así que el
+/// test inyecta los productos directo en `productsProvider` y solo cuenta
+/// las sincronizaciones disparadas por el botón de refresh.
+class _FakeSyncService implements SyncService {
+  int calls = 0;
 
   @override
-  Future<List<ProductDetailOut>> getProducts({
-    int? categoryId,
-    bool onlyVisible = true,
-  }) async {
-    onGetProducts();
-    return const [
-      ProductDetailOut(
-        id: 1,
-        name: 'Producto de prueba',
-        price: 10,
-        finalPrice: 10,
-        discountPercentage: 0,
-        description: 'Producto de prueba',
-        totalStock: 10,
-        cost: 5,
-        isVisible: true,
-      ),
-    ];
+  Future<SyncResult> sync() async {
+    calls++;
+    return const SyncResult.success(changed: true);
   }
-
-  @override
-  Future<List<CategoryOut>> getCategories() async => const [];
 }
+
+/// Tasa fresca de mentira (nunca debe aparecer el chip de "desactualizada").
+class _FakeExchangeRateNotifier extends ExchangeRateNotifier {
+  @override
+  Future<ExchangeRate> build() async => ExchangeRate(
+        currency: 'USD_VES',
+        rate: 36.5,
+        updatedAt: DateTime.now(),
+      );
+}
+
+/// Producto de prueba CON variación en stock: con los toggles de
+/// visualización apagados (default) solo se muestran productos con stock.
+const ProductDetailOut _fakeProduct = ProductDetailOut(
+  id: 1,
+  name: 'Producto de prueba',
+  price: 10,
+  finalPrice: 10,
+  discountPercentage: 0,
+  description: 'Producto de prueba',
+  totalStock: 10,
+  cost: 5,
+  isVisible: true,
+  variations: [VariationOut(id: 1, variationType: 'Normal', stock: 10)],
+  images: [
+    ProductImageOut(id: 1, imageUrl: '/media/prueba.jpg', isMain: true),
+  ],
+);
+
+/// Producto con dos fotos, para probar flechas y paginación del visor.
+const ProductDetailOut _fakeProductTwoImages = ProductDetailOut(
+  id: 2,
+  name: 'Producto dos fotos',
+  price: 10,
+  finalPrice: 10,
+  discountPercentage: 0,
+  description: 'x',
+  totalStock: 10,
+  cost: 5,
+  isVisible: true,
+  variations: [VariationOut(id: 21, variationType: 'Normal', stock: 5)],
+  images: [
+    ProductImageOut(id: 11, imageUrl: '/media/a.jpg', isMain: true),
+    ProductImageOut(id: 12, imageUrl: '/media/b.jpg'),
+  ],
+);
 
 /// Carrito con productos, para que "PROCESAR COBRO" quede habilitado.
 class _SeededCartNotifier extends CartNotifier {
@@ -65,6 +99,13 @@ class _SeededCartNotifier extends CartNotifier {
 const double kKeyboardHeight = 300;
 
 void main() {
+  // Toggles de visualización y demás prefs: valores en memoria.
+  SharedPreferences.setMockInitialValues({});
+
+  // Las imágenes usan Image.network en tests: el gestor con disco hace I/O
+  // real que el FakeAsync nunca completa (y deja timers pendientes).
+  CatalogImage.useDiskCache = false;
+
   /// Builds the screen inside an explicit [MediaQuery] so the system insets are
   /// deterministic (independent of `tester.view` semantics).
   ///
@@ -75,6 +116,10 @@ void main() {
     double keyboardHeight = 0,
   }) {
     return ProviderScope(
+      overrides: [
+        currentExchangeRateProvider
+            .overrideWith(() => _FakeExchangeRateNotifier()),
+      ],
       child: MaterialApp(
         home: Builder(
           builder: (context) {
@@ -121,6 +166,10 @@ void main() {
   }) async {
     await tester.pumpWidget(
       ProviderScope(
+        overrides: [
+          currentExchangeRateProvider
+              .overrideWith(() => _FakeExchangeRateNotifier()),
+        ],
         child: MaterialApp(
           home: Builder(
             builder: (hostContext) {
@@ -343,6 +392,10 @@ void main() {
       CreateOrderIn? sent;
       await tester.pumpWidget(
         ProviderScope(
+          overrides: [
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
+          ],
           child: MaterialApp(
             home: CheckoutScreen(
               cartItems: [OrderItemIn(variationId: 1, quantity: 1)],
@@ -563,24 +616,28 @@ void authErrorGroup() {
   group('Botón de actualizar del POS', () {
     Finder refreshButton() => find.byTooltip('Actualizar catálogo');
 
-    late int calls;
+    late _FakeSyncService fakeSync;
 
-    setUp(() => calls = 0);
+    setUp(() => fakeSync = _FakeSyncService());
 
     Future<void> pumpPos(WidgetTester tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            catalogRepositoryProvider.overrideWithValue(
-              _FakeCatalogRepository(() => calls++),
-            ),
-            currentExchangeRateProvider.overrideWith(
-              (ref) async => ExchangeRate(
-                currency: 'USD_VES',
-                rate: 36.5,
-                updatedAt: DateTime(2026),
-              ),
-            ),
+            // Base local en memoria (carrito + cola de órdenes).
+            appDatabaseProvider.overrideWithValue(
+                AppDatabase(NativeDatabase.memory())),
+            // El POS ya no pide el catálogo por HTTP: se inyecta directo.
+            productsProvider
+                .overrideWith((ref) async => const [_fakeProduct]),
+            categoriesProvider.overrideWith((ref) async => const []),
+            syncServiceProvider.overrideWithValue(fakeSync),
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
+            // Stream de la cola sin drift (drift deja un Timer pendiente
+            // al cerrar sus streams y los widget tests lo detectan).
+            outboxRowsProvider
+                .overrideWith((ref) => Stream.fromIterable(const [])),
             cartProvider.overrideWith(() => _SeededCartNotifier()),
           ],
           child: const MaterialApp(home: PosScreen()),
@@ -598,14 +655,13 @@ void authErrorGroup() {
     testWidgets('al pulsarlo vuelve a pedir los productos', (tester) async {
       await pumpPos(tester);
 
-      final callsBefore = calls;
-      expect(callsBefore, greaterThan(0));
+      final callsBefore = fakeSync.calls;
 
       await tester.tap(refreshButton());
       await tester.pumpAndSettle();
 
-      // Los productos se vuelven a solicitar al backend.
-      expect(calls, greaterThan(callsBefore));
+      // La sincronización (delta del catálogo) se dispara de nuevo.
+      expect(fakeSync.calls, greaterThan(callsBefore));
     });
 
     testWidgets('el refresh NO vacía el carrito en curso', (tester) async {
@@ -632,6 +688,182 @@ void authErrorGroup() {
     });
   });
 
+  group('Categorías (modal)', () {
+    // Regresión: la PRIMERA apertura capturaba el AsyncValue con `ref.read`
+    // y la hoja se quedaba en el spinner para siempre; al reabrirla el
+    // provider ya estaba resuelto y "aparecía al instante". La hoja ahora
+    // hace `watch` y debe reconstruirse cuando el future termine.
+    testWidgets('la primera apertura muestra los resultados al cargar',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider
+                .overrideWithValue(AppDatabase(NativeDatabase.memory())),
+            productsProvider
+                .overrideWith((ref) async => const [_fakeProduct]),
+            categoriesProvider.overrideWith((ref) async {
+              // Simula la demora del seed/red en la primera carga.
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+              return const [CategoryOut(id: 1, name: 'Bebidas')];
+            }),
+            syncServiceProvider.overrideWithValue(_FakeSyncService()),
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
+            outboxRowsProvider
+                .overrideWith((ref) => Stream.fromIterable(const [])),
+            cartProvider.overrideWith(() => _SeededCartNotifier()),
+          ],
+          child: const MaterialApp(home: PosScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Primera apertura: mientras carga se ve el spinner…
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Categorías'));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      // …y cuando el future resuelve, la MISMA hoja muestra los datos
+      // sin tener que cerrarla y abrirla otra vez.
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('Bebidas'), findsOneWidget);
+    });
+  });
+
+  group('Ver imagen grande', () {
+    testWidgets('el chip Ver abre el visor con zoom y se puede cerrar',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider
+                .overrideWithValue(AppDatabase(NativeDatabase.memory())),
+            productsProvider
+                .overrideWith((ref) async => const [_fakeProduct]),
+            categoriesProvider.overrideWith((ref) async => const []),
+            syncServiceProvider.overrideWithValue(_FakeSyncService()),
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
+            outboxRowsProvider
+                .overrideWith((ref) => Stream.fromIterable(const [])),
+            cartProvider.overrideWith(() => _SeededCartNotifier()),
+          ],
+          child: const MaterialApp(home: PosScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // El chip "Ver" vive sobre la imagen de la tarjeta…
+      expect(find.text('Ver'), findsOneWidget);
+      await tester.tap(find.text('Ver'));
+      await tester.pumpAndSettle();
+
+      // …y abre el visor con la imagen ampliable (sin abrir variantes).
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(InteractiveViewer), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Cerrar'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(InteractiveViewer), findsNothing);
+    });
+
+    testWidgets(
+        'el visor tiene flechas y se cierra con tap o con clic fuera',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider
+                .overrideWithValue(AppDatabase(NativeDatabase.memory())),
+            productsProvider
+                .overrideWith((ref) async => const [_fakeProductTwoImages]),
+            categoriesProvider.overrideWith((ref) async => const []),
+            syncServiceProvider.overrideWithValue(_FakeSyncService()),
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
+            outboxRowsProvider
+                .overrideWith((ref) => Stream.fromIterable(const [])),
+            cartProvider.overrideWith(() => _SeededCartNotifier()),
+          ],
+          child: const MaterialApp(home: PosScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Ver'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget);
+
+      // En la primera imagen solo está la flecha de avanzar…
+      expect(find.byTooltip('Imagen siguiente'), findsOneWidget);
+      expect(find.byTooltip('Imagen anterior'), findsNothing);
+
+      await tester.tap(find.byTooltip('Imagen siguiente'));
+      await tester.pumpAndSettle();
+      // …y al pasar a la segunda aparece la de retroceder.
+      expect(find.byTooltip('Imagen anterior'), findsOneWidget);
+
+      // Tocar la imagen sin arrastrar cierra el visor.
+      await tester.tap(find.byType(InteractiveViewer));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+
+      // El clic/tap fuera del diálogo (barrera) también lo cierra.
+      await tester.tap(find.text('Ver'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget);
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+    });
+  });
+
+  group('Teclado', () {
+    // Regresión: el foco del buscador sobrevivía a abrir/cerrar hojas y el
+    // teclado "se abría solo" al navegar. Con onTapOutside el toque fuera
+    // del campo baja el foco y el teclado no se revive.
+    testWidgets(
+        'baja el teclado al tocar fuera y no se reabre al cerrar una hoja',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider
+                .overrideWithValue(AppDatabase(NativeDatabase.memory())),
+            productsProvider
+                .overrideWith((ref) async => const [_fakeProduct]),
+            categoriesProvider.overrideWith((ref) async => const []),
+            syncServiceProvider.overrideWithValue(_FakeSyncService()),
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
+            outboxRowsProvider
+                .overrideWith((ref) => Stream.fromIterable(const [])),
+            cartProvider.overrideWith(() => _SeededCartNotifier()),
+          ],
+          child: const MaterialApp(home: PosScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // El buscador tiene foco y el teclado conectado.
+      await tester.tap(find.byType(TextField));
+      await tester.pumpAndSettle();
+      expect(tester.testTextInput.isVisible, isTrue);
+
+      // Tocar el botón de Categorías (fuera del campo) baja el teclado…
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Categorías'));
+      await tester.pumpAndSettle();
+      expect(tester.testTextInput.isVisible, isFalse);
+
+      // …y al cerrar la hoja el teclado NO se reabre solo.
+      await tester.tapAt(const Offset(4, 4)); // barrera de la hoja
+      await tester.pumpAndSettle();
+      expect(tester.testTextInput.isVisible, isFalse);
+    });
+  });
+
   group('CartPanel y la barra de navegación de Android', () {
     const navBar = 48.0;
 
@@ -652,6 +884,8 @@ void authErrorGroup() {
         ProviderScope(
           overrides: [
             cartProvider.overrideWith(() => _SeededCartNotifier()),
+            currentExchangeRateProvider
+                .overrideWith(() => _FakeExchangeRateNotifier()),
           ],
           child: MaterialApp(
             home: Builder(

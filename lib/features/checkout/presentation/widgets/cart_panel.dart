@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/cart_provider.dart';
+import 'rate_staleness_chip.dart';
 
 class CartPanel extends ConsumerWidget {
   final double? currentRate;
@@ -275,6 +276,11 @@ class CartPanel extends ConsumerWidget {
             ),
           ),
         ],
+        const SizedBox(height: 2),
+        const Align(
+          alignment: Alignment.centerRight,
+          child: RateStalenessChip(),
+        ),
       ],
     );
   }

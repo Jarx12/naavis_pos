@@ -30,6 +30,10 @@ class _SearchInputBarState extends ConsumerState<SearchInputBar> {
 
     return TextField(
       controller: _controller,
+      // Tocar cualquier otra parte de la pantalla baja el teclado y,
+      // sobre todo, limpia el foco para que no se "reviva" solo al
+      // abrir/cerrar hojas y diálogos.
+      onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
       onChanged: (value) {
         ref.read(searchQueryProvider.notifier).setQuery(value);
       },

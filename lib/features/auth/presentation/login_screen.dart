@@ -81,6 +81,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ],
                   TextFormField(
                     controller: _usernameController,
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
                     // Salta a la contraseña con la tecla del teclado en vez de
                     // tener que cerrarlo a mano.
                     textInputAction: TextInputAction.next,
@@ -97,6 +99,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   TextFormField(
                     controller: _passwordController,
                     focusNode: _passwordFocusNode,
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
                     obscureText: true,
                     // "Listo" en el teclado envia el formulario directamente.
                     textInputAction: TextInputAction.done,

@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
+import '../../../core/images/catalog_image.dart';
+import '../../../core/network/connectivity_provider.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import '../../catalog/presentation/providers/catalog_provider.dart';
+import '../../sync/data/sync_service.dart';
 import '../data/models/create_order_dto.dart';
-import '../data/orders_repository.dart';
 import '../data/models/exchange_rate.dart';
+import '../data/outbox_service.dart';
 import 'providers/cart_provider.dart';
+import 'providers/display_options.dart';
 import 'providers/search_provider.dart';
+import 'widgets/order_conflict_dialog.dart';
+import 'widgets/outbox_sheet.dart';
+import 'widgets/product_image_viewer.dart';
 import 'widgets/search_input_bar.dart';
 import 'widgets/variation_selection_dialog.dart';
 import 'widgets/cart_panel.dart';
@@ -19,18 +26,49 @@ final selectedCategoryProvider = StateProvider<dynamic>((ref) => null);
 /// layout with the cart accessible via a bottom sheet.
 const double _kWideBreakpoint = 900;
 
-class PosScreen extends ConsumerWidget {
+class PosScreen extends ConsumerStatefulWidget {
   const PosScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PosScreen> createState() => _PosScreenState();
+}
+
+class _PosScreenState extends ConsumerState<PosScreen> {
+  /// Spinner del botón de refresh (la sync puede tardar en el seed).
+  bool _refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Órdenes que quedaron pendientes de una sesión anterior: probar el
+    // envío apenas entra el POS (si no hay red, el timer sigue solo).
+    Future.microtask(() => ref.read(outboxServiceProvider).flush());
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final cartItems = ref.watch(cartProvider);
     final cartNotifier = ref.read(cartProvider.notifier);
+    final displayOptions = ref.watch(displayOptionsProvider);
+    final outboxRows = ref.watch(outboxRowsProvider).value ?? const [];
+    final attentionCount = outboxRows.where((r) => r.needsAttention).length;
 
-    // Mientras se recarga el catálogo el botón muestra un spinner y se
-    // deshabilita, para no disparar varias peticiones seguidas.
-    final isRefreshing =
-        ref.watch(productsProvider.select((value) => value.isLoading));
+    // Reacciones a eventos de la cola disparados por los reenvíos de
+    // fondo (timer de reintentos / vuelta de la red).
+    ref.listen(outboxEventProvider, (previous, next) {
+      final event = next;
+      if (event == null || event.seq == previous?.seq) return;
+      _handleOutboxEvent(event);
+    });
+
+    // Al volver la red: sacar la cola y refrescar el catálogo.
+    ref.listen(connectivityProvider, (previous, next) {
+      if (next == ConnectivityState.online &&
+          previous != ConnectivityState.online) {
+        ref.read(outboxServiceProvider).flush();
+        _backgroundSync();
+      }
+    });
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -43,7 +81,7 @@ class PosScreen extends ConsumerWidget {
             foregroundColor: Colors.white,
             actions: [
               IconButton(
-                icon: isRefreshing
+                icon: _refreshing
                     ? const SizedBox(
                         width: 20,
                         height: 20,
@@ -55,7 +93,27 @@ class PosScreen extends ConsumerWidget {
                     : const Icon(Icons.refresh),
                 tooltip: 'Actualizar catálogo',
                 onPressed:
-                    isRefreshing ? null : () => _refreshCatalog(context, ref),
+                    _refreshing ? null : () => _refreshCatalog(context),
+              ),
+              IconButton(
+                icon: Badge(
+                  isLabelVisible: outboxRows.isNotEmpty,
+                  label: Text('${outboxRows.length}'),
+                  backgroundColor:
+                      attentionCount > 0 ? Colors.red : Colors.orange,
+                  child: const Icon(Icons.pending_actions),
+                ),
+                tooltip: 'Órdenes fuera de línea',
+                onPressed: () => OutboxSheet.show(context),
+              ),
+              IconButton(
+                icon: Badge(
+                  isLabelVisible: displayOptions.showInvisible ||
+                      displayOptions.showOutOfStock,
+                  child: const Icon(Icons.tune),
+                ),
+                tooltip: 'Opciones de visualización',
+                onPressed: () => _showDisplayOptionsDialog(context),
               ),
               if (cartItems.isNotEmpty)
                 IconButton(
@@ -66,7 +124,7 @@ class PosScreen extends ConsumerWidget {
               IconButton(
                 icon: const Icon(Icons.logout, color: Colors.redAccent),
                 tooltip: 'Cerrar Sesión',
-                onPressed: () => _confirmLogout(context, ref),
+                onPressed: () => _confirmLogout(context),
               ),
             ],
           ),
@@ -80,34 +138,150 @@ class PosScreen extends ConsumerWidget {
     );
   }
 
-  /// Vuelve a pedir productos, categorías y tasa de cambio.
-  ///
-  /// No se toca el carrito (la orden en curso debe sobrevivir) ni la búsqueda o
-  /// la categoría seleccionada, porque son estado local del cliente y el
-  /// filtrado de productos se hace en memoria sobre la lista recargada.
-  Future<void> _refreshCatalog(BuildContext context, WidgetRef ref) async {
-    ref
-      ..invalidate(productsProvider)
-      ..invalidate(categoriesProvider)
-      ..invalidate(currentExchangeRateProvider);
 
+  /// Sincroniza delta + tasa y refresca la UI. El catálogo local sirve
+  /// aunque la falle: en ese caso se avisa y se siguen mostrando los
+  /// datos guardados en este equipo.
+  Future<void> _refreshCatalog(BuildContext context) async {
+    setState(() => _refreshing = true);
     try {
-      // Espera a la recarga para poder confirmar el resultado al usuario.
-      await ref.read(productsProvider.future);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      final result = await ref.read(syncServiceProvider).sync();
+      if (!mounted) return;
+
+      ref
+        ..invalidate(productsProvider)
+        ..invalidate(categoriesProvider)
+        ..invalidate(currentExchangeRateProvider);
+
+      if (!context.mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      if (result.ok) {
+        messenger.showSnackBar(
           const SnackBar(
             content: Text('Catálogo actualizado'),
             duration: Duration(seconds: 2),
           ),
         );
+      } else if (result.offline) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Sin conexión: se muestran los datos guardados localmente.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        messenger.showSnackBar(SnackBar(
+          content: Text(result.message ?? 'No se pudo actualizar.'),
+          backgroundColor: Colors.red,
+        ));
       }
-    } catch (_) {
-      // El error ya se muestra en el cuerpo de la pantalla; no se duplica.
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
-  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+  /// Delta en segundo plano; refresca la grilla cuando termine.
+  void _backgroundSync() {
+    ref.read(syncServiceProvider).sync().then((result) {
+      if (mounted && result.ok) {
+        ref
+          ..invalidate(productsProvider)
+          ..invalidate(categoriesProvider);
+      }
+    });
+  }
+
+  /// Reacciona a los eventos que la cola emite durante los reenvíos de
+  /// fondo (los envíos desde el checkout se manejan ahí mismo).
+  Future<void> _handleOutboxEvent(OutboxEvent event) async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    switch (event.kind) {
+      case OutboxEventKind.sent:
+        _backgroundSync();
+        messenger.showSnackBar(SnackBar(
+          content: Text(
+              'Orden #${event.orderId ?? ''} enviada. Total: Bs. ${event.totalBs ?? ''}'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 4),
+        ));
+      case OutboxEventKind.attention:
+        // Rechazo de negocio detectado en un reenvío de fondo (típico:
+        // el stock cambió mientras la orden estaba encolada).
+        _backgroundSync();
+        if (event.errorCode == 'INSUFFICIENT_STOCK') {
+          await OrderConflictDialog.show(context, event.localId);
+        } else {
+          messenger.showSnackBar(SnackBar(
+            content: Text(
+                '${event.errorMessage ?? 'Orden rechazada por el server.'} '
+                'Ábrela desde "Órdenes fuera de línea" para editarla o '
+                'descartarla.'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ));
+        }
+      case OutboxEventKind.queued:
+        // Solo informativo; el checkout ya muestra su propio aviso.
+        break;
+    }
+  }
+
+  /// Dos switches: mostrar invisibles / mostrar agotados (persistidos).
+  void _showDisplayOptionsDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setLocal) {
+            final options = ref.read(displayOptionsProvider);
+            final notifier = ref.read(displayOptionsProvider.notifier);
+            return AlertDialog(
+              title: const Text('Mostrar en la grilla'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Productos ocultos'),
+                    subtitle: const Text(
+                        'No visibles en la tienda (badge "OCULTO")'),
+                    value: options.showInvisible,
+                    onChanged: (v) {
+                      notifier.setShowInvisible(v);
+                      setLocal(() {});
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Productos agotados'),
+                    subtitle: const Text(
+                        'Sin stock en ninguna variación (badge "AGOTADO")'),
+                    value: options.showOutOfStock,
+                    onChanged: (v) {
+                      notifier.setShowOutOfStock(v);
+                      setLocal(() {});
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Listo'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmLogout(BuildContext context) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -450,6 +624,8 @@ class _ProductGrid extends ConsumerWidget {
     final searchQuery = ref.watch(searchQueryProvider);
     final selectedCategory = ref.watch(selectedCategoryProvider);
     final exchangeRateAsync = ref.watch(currentExchangeRateProvider);
+    final displayOptions = ref.watch(displayOptionsProvider);
+    final connectivity = ref.watch(connectivityProvider);
     final dioClient = ref.watch(dioClientProvider);
 
     final fullUri = Uri.parse(dioClient.dio.options.baseUrl);
@@ -484,6 +660,14 @@ class _ProductGrid extends ConsumerWidget {
       data: (products) {
         final query = searchQuery.toLowerCase().trim();
         final filtered = products.where((product) {
+          // Filtros de visualización (togglables): invisibles / agotados.
+          // Con ambos apagados se replica el `only_visible` del server.
+          final hasStock = product.variations.any((v) => v.stock > 0);
+          if (!displayOptions.showInvisible && !product.isVisible) {
+            return false;
+          }
+          if (!displayOptions.showOutOfStock && !hasStock) return false;
+
           bool matchesQuery = true;
           if (query.isNotEmpty) {
             final matchesName =
@@ -505,13 +689,23 @@ class _ProductGrid extends ConsumerWidget {
         }).toList();
 
         if (filtered.isEmpty) {
+          final offline =
+              connectivity == ConnectivityState.offline;
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
-                query.isEmpty && selectedCategory == null
-                    ? 'No hay productos disponibles.'
-                    : 'No se encontraron productos con los filtros aplicados.',
+                offline && products.isEmpty
+                    ? 'Sin conexión y sin productos guardados en este '
+                        'equipo. Conéctate una vez para descargar el '
+                        'catálogo.'
+                    : query.isEmpty && selectedCategory == null
+                        ? (products.isEmpty
+                            ? 'No hay productos disponibles.'
+                            : 'Todos los productos están ocultos por los '
+                                'filtros de visualización.')
+                        : 'No se encontraron productos con los filtros '
+                            'aplicados.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 16, color: Colors.grey),
               ),
@@ -540,6 +734,8 @@ class _ProductGrid extends ConsumerWidget {
             final double? priceBs = currentRate != null
                 ? priceUsd * currentRate
                 : null;
+            final hasStock = product.variations.any((v) => v.stock > 0);
+            final imageUrls = productImageUrls(product, serverBaseUrl);
 
             return Card(
               elevation: 2,
@@ -551,9 +747,90 @@ class _ProductGrid extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Expanded(
-                      child: ProductImageCarousel(
-                        product: product,
-                        baseUrl: serverBaseUrl,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ProductImageCarousel(
+                            product: product,
+                            baseUrl: serverBaseUrl,
+                          ),
+                          // Badges de estado: solo visibles cuando los
+                          // toggles muestran estos productos (con los
+                          // toggles apagados ni siquiera se dibujan).
+                          if (!hasStock || !product.isVisible)
+                            Positioned(
+                              top: 6,
+                              left: 6,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (!hasStock)
+                                    const _StatusBadge(
+                                      label: 'AGOTADO',
+                                      color: Colors.red,
+                                    ),
+                                  if (!hasStock && !product.isVisible)
+                                    const SizedBox(width: 4),
+                                  if (!product.isVisible)
+                                    const _StatusBadge(
+                                      label: 'OCULTO',
+                                      color: Colors.blueGrey,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          // Ver la imagen más grande (el tap del chip no
+                          // abre el diálogo de variantes: gana el hijo).
+                          if (imageUrls.isNotEmpty)
+                            Positioned(
+                              right: 6,
+                              bottom: 6,
+                              child: Material(
+                                color: Colors.black.withValues(alpha: 0.45),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(
+                                    color:
+                                        Colors.white.withValues(alpha: 0.25),
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () => ProductImageViewer.show(
+                                    context,
+                                    title: product.name,
+                                    urls: imageUrls,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 9, vertical: 4),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.zoom_in,
+                                          size: 13,
+                                          color: Colors.white
+                                              .withValues(alpha: 0.9),
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          'Ver',
+                                          style: TextStyle(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.9),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 0.2,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     Padding(
@@ -630,95 +907,144 @@ class _ProductGrid extends ConsumerWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+/// Chip compacto de estado sobre la foto del producto (AGOTADO / OCULTO).
+class _StatusBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _StatusBadge({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
 // Categories bottom sheet
 // ─────────────────────────────────────────────────────────────
 void openCategoriesModal(BuildContext context, WidgetRef ref) {
-  final selectedCategory = ref.read(selectedCategoryProvider);
-  final categoriesAsync = ref.read(categoriesProvider);
-
   showModalBottomSheet(
     context: context,
     useSafeArea: true,
     showDragHandle: true,
     builder: (modalContext) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Categorías',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (selectedCategory != null)
-                  TextButton.icon(
-                    icon: const Icon(Icons.clear, size: 18),
-                    label: const Text('Limpiar filtro'),
-                    onPressed: () {
-                      ref
-                          .read(selectedCategoryProvider.notifier)
-                          .state = null;
-                      Navigator.pop(modalContext);
-                    },
-                  ),
-              ],
-            ),
-            const Divider(),
-            Expanded(
-              child: categoriesAsync.when(
-                loading: () => const Center(
-                  child: CircularProgressIndicator(),
-                ),
-                error: (err, _) => Center(
-                  child: Text(
-                    'Error al cargar categorías: $err',
-                    style: const TextStyle(color: Colors.red),
-                  ),
-                ),
-                data: (categories) {
-                  if (categories.isEmpty) {
-                    return const Center(
-                      child: Text('No hay categorías disponibles.'),
-                    );
-                  }
-                  return ListView.builder(
-                    itemCount: categories.length,
-                    itemBuilder: (context, index) {
-                      final category = categories[index];
-                      final isSelected =
-                          selectedCategory?.id == category.id;
+      // IMPORTANTE: `ref.watch` dentro de un Consumer. Antes el AsyncValue
+      // se capturaba con `ref.read` al abrir la hoja: la primera vez el
+      // future aún no resolvía y NADA reconstruía el builder, así que el
+      // spinner giraba para siempre; al reabrirla el provider ya tenía
+      // datos y la lista aparecía "instantánea". Con watch, la hoja se
+      // reconstruye cuando la FutureProvider resuelve (o falla).
+      return Consumer(
+        builder: (context, ref, _) {
+          final selectedCategory = ref.watch(selectedCategoryProvider);
+          final categoriesAsync = ref.watch(categoriesProvider);
 
-                      return ListTile(
-                        title: Text(category.name),
-                        selected: isSelected,
-                        selectedTileColor: Colors.indigo.shade50,
-                        trailing: isSelected
-                            ? const Icon(
-                                Icons.check_circle,
-                                color: Colors.indigo,
-                              )
-                            : null,
-                        onTap: () {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Categorías',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (selectedCategory != null)
+                      TextButton.icon(
+                        icon: const Icon(Icons.clear, size: 18),
+                        label: const Text('Limpiar filtro'),
+                        onPressed: () {
                           ref
                               .read(selectedCategoryProvider.notifier)
-                              .state = category;
+                              .state = null;
                           Navigator.pop(modalContext);
+                        },
+                      ),
+                  ],
+                ),
+                const Divider(),
+                Expanded(
+                  child: categoriesAsync.when(
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (err, _) => Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Error al cargar categorías: $err',
+                            style: const TextStyle(color: Colors.red),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Reintentar'),
+                            onPressed: () =>
+                                ref.invalidate(categoriesProvider),
+                          ),
+                        ],
+                      ),
+                    ),
+                    data: (categories) {
+                      if (categories.isEmpty) {
+                        return const Center(
+                          child: Text('No hay categorías disponibles.'),
+                        );
+                      }
+                      return ListView.builder(
+                        itemCount: categories.length,
+                        itemBuilder: (context, index) {
+                          final category = categories[index];
+                          final isSelected =
+                              selectedCategory?.id == category.id;
+
+                          return ListTile(
+                            title: Text(category.name),
+                            selected: isSelected,
+                            selectedTileColor: Colors.indigo.shade50,
+                            trailing: isSelected
+                                ? const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.indigo,
+                                  )
+                                : null,
+                            onTap: () {
+                              ref
+                                  .read(selectedCategoryProvider.notifier)
+                                  .state = category;
+                              Navigator.pop(modalContext);
+                            },
+                          );
                         },
                       );
                     },
-                  );
-                },
-              ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       );
     },
   );
@@ -727,6 +1053,18 @@ void openCategoriesModal(BuildContext context, WidgetRef ref) {
 // ─────────────────────────────────────────────────────────────
 // Checkout bottom sheet (shared by both layouts)
 // ─────────────────────────────────────────────────────────────
+/// Delta de catálogo tras una orden (enviada o rechazada): el stock local
+/// quedó viejo en cualquier caso y hay que refrescar la grilla.
+void _syncAfterOrder(WidgetRef ref) {
+  ref.read(syncServiceProvider).sync().then((result) {
+    if (result.ok) {
+      ref
+        ..invalidate(productsProvider)
+        ..invalidate(categoriesProvider);
+    }
+  });
+}
+
 void openCheckoutModal(
   BuildContext context,
   WidgetRef ref,
@@ -764,39 +1102,54 @@ void openCheckoutModal(
           subtotal: cartNotifier.subtotal,
           currentRate: currentRate,
           onSubmitOrder: (orderPayload) async {
-            try {
-              final ordersRepo = ref.read(ordersRepositoryProvider);
-              final result =
-                  await ordersRepo.createOrder(orderPayload.toJson());
+            // La orden SIEMPRE se encola primero (clave idempotente) y se
+            // intenta enviar ya mismo. Sin red queda guardada y se manda
+            // sola al reconectar; si el server la rechaza por negocio
+            // (stock), el cajero la edita o la descarta.
+            final outbox = ref.read(outboxServiceProvider);
+            final result = await outbox.submit(orderPayload.toJson());
+            if (!context.mounted) return;
 
-              if (context.mounted) {
+            final messenger = ScaffoldMessenger.of(context);
+            switch (result.outcome) {
+              case OutboxOutcome.sent:
                 Navigator.of(dialogContext).pop();
                 cartNotifier.clear();
-                ref.invalidate(productsProvider);
-                final orderId = result['id'];
-                final totalBs = result['total_bs'];
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                _syncAfterOrder(ref);
+                messenger.showSnackBar(SnackBar(
+                  content: Text(
+                      '¡Orden #${result.orderId} creada exitosamente! Total: Bs. ${result.totalBs ?? ''}'),
+                  backgroundColor: Colors.green,
+                  duration: const Duration(seconds: 4),
+                ));
+              case OutboxOutcome.waiting:
+                Navigator.of(dialogContext).pop();
+                cartNotifier.clear();
+                messenger.showSnackBar(const SnackBar(
+                  content: Text(
+                      'Sin conexión: la orden quedó guardada y se enviará '
+                      'sola al reconectar.'),
+                  backgroundColor: Colors.orange,
+                  duration: Duration(seconds: 5),
+                ));
+              case OutboxOutcome.attention:
+                // Rechazo de negocio: la venta NO ocurrió y la orden queda
+                // en la cola a merced del cajero (editar o descartar).
+                Navigator.of(dialogContext).pop();
+                cartNotifier.clear();
+                if (result.errorCode == 'INSUFFICIENT_STOCK') {
+                  await OrderConflictDialog.show(context, result.localId);
+                } else {
+                  messenger.showSnackBar(SnackBar(
                     content: Text(
-                      '¡Orden #$orderId creada exitosamente! Total: Bs. ${totalBs ?? ''}',
-                    ),
-                    backgroundColor: Colors.green,
-                    duration: const Duration(seconds: 4),
-                  ),
-                );
-              }
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      e.toString().replaceAll('Exception: ', ''),
-                    ),
+                        '${result.errorMessage ?? 'El server rechazó la orden.'} '
+                        'Ábrela desde "Órdenes fuera de línea" para editarla '
+                        'o descartarla.'),
                     backgroundColor: Colors.red,
-                  ),
-                );
-              }
+                    duration: const Duration(seconds: 6),
+                  ));
+                }
+                _syncAfterOrder(ref);
             }
           },
         ),
@@ -827,25 +1180,8 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
   late final PageController _pageController;
   int _currentIndex = 0;
 
-  List<String> _getImageUrls() {
-    final List<String> urls = [];
-    if (widget.product.images != null &&
-        widget.product.images.isNotEmpty) {
-      for (final img in widget.product.images) {
-        final path = img.imageUrl ?? img.url;
-        if (path != null) {
-          urls.add(
-            path.startsWith('http') ? path : '${widget.baseUrl}$path',
-          );
-        }
-      }
-    }
-    if (urls.isEmpty) {
-      final mainUrl = widget.product.getMainImageUrl(widget.baseUrl);
-      if (mainUrl != null) urls.add(mainUrl);
-    }
-    return urls;
-  }
+  List<String> _getImageUrls() =>
+      productImageUrls(widget.product, widget.baseUrl);
 
   @override
   void initState() {
@@ -887,10 +1223,21 @@ class _ProductImageCarouselState extends State<ProductImageCarousel> {
               setState(() => _currentIndex = index);
             },
             itemBuilder: (context, index) {
-              return Image.network(
-                imageUrls[index],
+              return CatalogImage(
+                imageUrl: imageUrls[index],
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const Center(
+                // Decodifica al ancho de la tarjeta (~200dp): mucha menos
+                // memoria y scroll más fluido. En disco se guarda el
+                // original a tamaño completo (para el visor con zoom).
+                memCacheWidth: 600,
+                placeholder: (_, _) => const Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+                errorWidget: (_, _, _) => const Center(
                   child: Icon(
                     Icons.image_not_supported,
                     color: Colors.grey,

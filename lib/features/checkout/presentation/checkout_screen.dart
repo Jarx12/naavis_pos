@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/network/connectivity_provider.dart';
 import '../data/models/create_order_dto.dart';
 import '../data/orders_repository.dart';
+import 'widgets/rate_staleness_chip.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   final List<OrderItemIn> cartItems;
@@ -224,6 +226,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Sin cupones offline (decisión de producto): el server valida el
+    // cupón al crear la orden y sin red no hay forma de verificarlo.
+    final isOffline =
+        ref.watch(connectivityProvider) == ConnectivityState.offline;
+
     return Scaffold(
       // El inset del teclado se aplica UNA sola vez, en el `Padding` de
       // `showModalBottomSheet` (ver `PosScreen.openCheckoutModal`): la hoja
@@ -265,6 +272,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _customerNameCtrl,
+                      onTapOutside: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
                       textInputAction: TextInputAction.next,
                       textCapitalization: TextCapitalization.words,
                       decoration: const InputDecoration(
@@ -337,6 +346,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     if (_requiresRef) ...[
                       TextFormField(
                         controller: _paymentRefCtrl,
+                        onTapOutside: (_) =>
+                            FocusManager.instance.primaryFocus?.unfocus(),
                         textInputAction: TextInputAction.next,
                         keyboardType: TextInputType.text,
                         decoration: const InputDecoration(
@@ -372,19 +383,25 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                 Expanded(
                                   child: TextFormField(
                                     controller: _couponCodeCtrl,
+                                    onTapOutside: (_) => FocusManager
+                                        .instance.primaryFocus?.unfocus(),
+                                    enabled: !isOffline,
                                     textInputAction: TextInputAction.done,
                                     textCapitalization:
                                         TextCapitalization.characters,
                                     onFieldSubmitted: (_) => _validateCoupon(),
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       labelText: 'Cupón (Opcional)',
-                                      border: OutlineInputBorder(),
+                                      hintText: isOffline
+                                          ? 'Requiere conexión'
+                                          : null,
+                                      border: const OutlineInputBorder(),
                                     ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
                                 IconButton.filledTonal(
-                                  onPressed: _isValidatingCoupon
+                                  onPressed: (isOffline || _isValidatingCoupon)
                                       ? null
                                       : _validateCoupon,
                                   icon: _isValidatingCoupon
@@ -395,10 +412,21 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                               strokeWidth: 2),
                                         )
                                       : const Icon(Icons.check),
-                                  tooltip: 'Validar Cupón',
+                                  tooltip: isOffline
+                                      ? 'Los cupones requieren conexión'
+                                      : 'Validar Cupón',
                                 ),
                               ],
                             ),
+                            if (isOffline)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'Los cupones requieren conexión a internet.',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.orange),
+                                ),
+                              ),
                             if (_couponMessage != null) ...[
                               const SizedBox(height: 4),
                               Text(
@@ -416,6 +444,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
                         final volumeField = TextFormField(
                           controller: _discountVolumenCtrl,
+                          onTapOutside: (_) =>
+                              FocusManager.instance.primaryFocus?.unfocus(),
                           textInputAction: TextInputAction.done,
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true),
@@ -477,6 +507,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
                     TextFormField(
                       controller: _noteCtrl,
+                      onTapOutside: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
                       maxLines: 2,
                       textInputAction: TextInputAction.done,
                       onFieldSubmitted: (_) =>
@@ -589,6 +621,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    const Center(child: RateStalenessChip()),
+
                     const SizedBox(height: 20),
 
                     // ── Botón Generar Orden ───────────────────────────

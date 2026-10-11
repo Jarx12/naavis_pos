@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/auth/domain/auth_model.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../config/app_config.dart';
+import 'connectivity_provider.dart';
 
 class DioClient {
   final Dio dio;
@@ -25,7 +26,19 @@ class DioClient {
           }
           return handler.next(options);
         },
+        onResponse: (response, handler) {
+          // Hubo respuesta HTTP = hay conexión.
+          ref.read(connectivityProvider.notifier).markOnline();
+          return handler.next(response);
+        },
         onError: (DioException error, handler) async {
+          // Sin respuesta HTTP (socket/timeout de conexión) = sin conexión.
+          if (error.response == null) {
+            ref.read(connectivityProvider.notifier).markOffline();
+          } else {
+            ref.read(connectivityProvider.notifier).markOnline();
+          }
+
           // Si expira el access token (401)
           if (error.response?.statusCode == 401) {
             final authState = ref.read(authProvider);
