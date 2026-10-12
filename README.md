@@ -37,9 +37,12 @@ Dos capas, una por plataforma:
 
 - **App (nativo)**: `cached_network_image` con `PosImageCacheManager`
   (`lib/core/images/pos_image_cache.dart`) guarda las fotos en disco
-  (LRU de 500 archivos, revalida a los 30 días). La tarjeta del grid
-  decodifica a 600px de ancho (`memCacheWidth`); el visor usa el
-  original a tamaño completo para el zoom.
+  (LRU de 500 archivos, revalida a los 30 días). Además, cada sync
+  exitosa precachéa en segundo plano las fotos del catálogo local
+  (`CatalogImagePrefetcher`, mejor esfuerzo y sin bloquear la sync),
+  así el cajero no espera la primera descarga al ver un producto. La
+  tarjeta del grid decodifica a 600px de ancho (`memCacheWidth`); el
+  visor usa el original a tamaño completo para el zoom.
 - **Web (PWA)**: las imágenes usan `Image.network` (sin
   `cached_network_image`, que no cachea en web); el navegador cachea
   `/media/` según las cabeceras de nginx.

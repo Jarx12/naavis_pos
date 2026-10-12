@@ -267,6 +267,19 @@ class LocalCatalogRepository {
     return [for (final c in rows) CategoryOut(id: c.id, name: c.name)];
   }
 
+  /// URLs crudas (tal cual las guardó el server) de todas las fotos del
+  /// catálogo local. Las usa el prefetch de la sync para bajarlas a la
+  /// caché de disco: leer desde la DB (y no solo desde las páginas del
+  /// delta) permite retomar un precache interrumpido aunque la próxima
+  /// sync no traiga cambios de contenido.
+  Future<List<String>> getImageUrls() async {
+    final rows = await _db.select(_db.productImages).get();
+    return [
+      for (final r in rows)
+        if (r.imageUrl != null && r.imageUrl!.isNotEmpty) r.imageUrl!,
+    ];
+  }
+
   /// Etiqueta y stock local de una variación (diálogo de conflicto de stock).
   Future<({String label, int stock})?> getVariationInfo(
       int variationId) async {

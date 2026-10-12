@@ -29,7 +29,8 @@ List<String> productImageUrls(dynamic product, String baseUrl) {
   return urls;
 }
 
-/// Visor de imágenes a pantalla casi completa: pinch para zoom, arrastre
+/// Visor de imágenes minimalista: la foto flota sobre una capa oscura al
+/// 60 % de transparencia, sin caja ni cabecera. Pinch para zoom, arrastre
 /// para moverse y `PageView` si el producto tiene varias fotos.
 class ProductImageViewer extends StatefulWidget {
   final String title;
@@ -43,8 +44,10 @@ class ProductImageViewer extends StatefulWidget {
 
   /// Abre el visor (no hace nada si no hay imágenes).
   ///
-  /// Se cierra con el botón ✕, tocando la imagen (sin arrastrar) o
-  /// haciendo clic fuera del diálogo (barrera).
+  /// No hay recuadro ni cabecera: la imagen se ve flotando sobre el
+  /// contenido de atrás, separado por una capa oscura al 60 % de
+  /// transparencia. Se cierra con el botón ✕, tocando la imagen (sin
+  /// arrastrar) o tocando la capa oscura (barrera).
   static Future<void> show(
     BuildContext context, {
     required String title,
@@ -54,6 +57,8 @@ class ProductImageViewer extends StatefulWidget {
     return showDialog<void>(
       context: context,
       barrierDismissible: true,
+      // Capa oscura al 60 % detrás de la imagen.
+      barrierColor: Colors.black.withValues(alpha: 0.6),
       builder: (_) => ProductImageViewer(title: title, imageUrls: urls),
     );
   }
@@ -90,144 +95,125 @@ class _ProductImageViewerState extends State<ProductImageViewer> {
   Widget build(BuildContext context) {
     final hasMany = widget.imageUrls.length > 1;
 
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      clipBehavior: Clip.antiAlias,
-      backgroundColor: const Color(0xFF141414),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    // Sin caja ni cabecera: la imagen flota sobre la capa oscura (barrier
+    // al 60 %) y los controles (✕ y flechas) quedan encima.
+    return Semantics(
+      label: 'Visor de imágenes de ${widget.title}',
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          // ── Cabecera ─────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 4, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Cerrar',
-                  icon: const Icon(Icons.close, color: Colors.white),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: Colors.white24),
-          // ── Imagen(es) con zoom ──────────────────────────────────
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Tocar/clicar sin arrastrar cierra el visor; el arrastre
-                // (swipe del PageView, pan/zoom del InteractiveViewer) lo
-                // siguen ganando los reconocedores interiores.
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.of(context).pop(),
-                  child: PageView.builder(
-                    controller: _pageController,
-                    itemCount: widget.imageUrls.length,
-                    onPageChanged: (i) => setState(() => _index = i),
-                    itemBuilder: (context, index) {
-                      return InteractiveViewer(
-                        minScale: 0.5,
-                        maxScale: 5,
-                        child: SizedBox.expand(
-                          child: CatalogImage(
-                            imageUrl: widget.imageUrls[index],
-                            fit: BoxFit.contain,
-                            // Sin memCacheWidth: el visor necesita el original
-                            // a tamaño completo para que el zoom salve calidad.
-                            placeholder: (_, _) => const Center(
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white70,
-                              ),
-                            ),
-                            errorWidget: (_, _, _) => const Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.broken_image,
-                                      color: Colors.white54, size: 48),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'No se pudo cargar la imagen',
-                                    style: TextStyle(color: Colors.white54),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+          // Tocar/clicar sin arrastrar cierra el visor; el arrastre
+          // (swipe del PageView, pan/zoom del InteractiveViewer) lo
+          // siguen ganando los reconocedores interiores.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).pop(),
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: widget.imageUrls.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (context, index) {
+                return InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 5,
+                  child: SizedBox.expand(
+                    child: CatalogImage(
+                      imageUrl: widget.imageUrls[index],
+                      fit: BoxFit.contain,
+                      // Sin memCacheWidth: el visor necesita el original
+                      // a tamaño completo para que el zoom salve calidad.
+                      placeholder: (_, _) => const Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white70,
                         ),
-                      );
-                    },
-                  ),
-                ),
-                // Flechas: cambian de imagen con clic (escritorio) o tap
-                // (móvil), sin necesidad de arrastrar.
-                if (hasMany && _index > 0)
-                  Positioned(
-                    left: 8,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: _NavButton(
-                        icon: Icons.chevron_left,
-                        tooltip: 'Imagen anterior',
-                        onTap: () => _goTo(_index - 1),
+                      ),
+                      errorWidget: (_, _, _) => const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.broken_image,
+                                color: Colors.white54, size: 48),
+                            SizedBox(height: 8),
+                            Text(
+                              'No se pudo cargar la imagen',
+                              style: TextStyle(color: Colors.white54),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                if (hasMany && _index < widget.imageUrls.length - 1)
-                  Positioned(
-                    right: 8,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: _NavButton(
-                        icon: Icons.chevron_right,
-                        tooltip: 'Imagen siguiente',
-                        onTap: () => _goTo(_index + 1),
-                      ),
-                    ),
-                  ),
-              ],
+                );
+              },
             ),
           ),
-          // ── Indicador de páginas ─────────────────────────────────
-          if (hasMany)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var i = 0; i < widget.imageUrls.length; i++)
-                    Container(
-                      width: 8,
-                      height: 8,
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color:
-                            i == _index ? Colors.white : Colors.white24,
-                      ),
-                    ),
-                ],
+          // Cerrar: botón circular en la esquina superior derecha, mismo
+          // lenguaje visual que las flechas.
+          Positioned(
+            top: 4,
+            right: 4,
+            child: _NavButton(
+              icon: Icons.close,
+              tooltip: 'Cerrar',
+              onTap: () => Navigator.of(context).pop(),
+            ),
+          ),
+          // Flechas: cambian de imagen con clic (escritorio) o tap
+          // (móvil), sin necesidad de arrastrar.
+          if (hasMany && _index > 0)
+            Positioned(
+              left: 8,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _NavButton(
+                  icon: Icons.chevron_left,
+                  tooltip: 'Imagen anterior',
+                  onTap: () => _goTo(_index - 1),
+                ),
               ),
-            )
-          else
-            const SizedBox(height: 10),
+            ),
+          if (hasMany && _index < widget.imageUrls.length - 1)
+            Positioned(
+              right: 8,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _NavButton(
+                  icon: Icons.chevron_right,
+                  tooltip: 'Imagen siguiente',
+                  onTap: () => _goTo(_index + 1),
+                ),
+              ),
+            ),
+          // ── Indicador de páginas (flota abajo, sobre la capa) ────
+          if (hasMany)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 16,
+              // Los puntos no interceptan el toque: al tocarlos se cierra
+              // el visor igual que en el resto del fondo.
+              child: IgnorePointer(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var i = 0; i < widget.imageUrls.length; i++)
+                      Container(
+                        width: 8,
+                        height: 8,
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color:
+                              i == _index ? Colors.white : Colors.white24,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

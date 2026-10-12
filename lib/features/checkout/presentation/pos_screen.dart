@@ -779,92 +779,98 @@ class _ProductGrid extends ConsumerWidget {
                                 ],
                               ),
                             ),
-                          // Ver la imagen más grande (el tap del chip no
-                          // abre el diálogo de variantes: gana el hijo).
-                          if (imageUrls.isNotEmpty)
-                            Positioned(
-                              right: 6,
-                              bottom: 6,
-                              child: Material(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  side: BorderSide(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.25),
-                                  ),
+                        ],
+                      ),
+                    ),
+                    // Pila del bloque inferior: el chip "Ver" se ancla a la
+                    // esquina de la tarjeta (no a la de la imagen), así no
+                    // tapa la foto. El tap del chip no abre el diálogo de
+                    // variantes: gana el hijo.
+                    Stack(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                product.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                clipBehavior: Clip.antiAlias,
-                                child: InkWell(
-                                  onTap: () => ProductImageViewer.show(
-                                    context,
-                                    title: product.name,
-                                    urls: imageUrls,
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 9, vertical: 4),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.zoom_in,
-                                          size: 13,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '\$${priceUsd.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                priceBs != null
+                                    ? 'Bs. ${priceBs.toStringAsFixed(2)}'
+                                    : 'Bs. --',
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (imageUrls.isNotEmpty)
+                          Positioned(
+                            right: 8,
+                            bottom: 8,
+                            child: Material(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color:
+                                      Colors.white.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                onTap: () => ProductImageViewer.show(
+                                  context,
+                                  title: product.name,
+                                  urls: imageUrls,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 9, vertical: 4),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.zoom_in,
+                                        size: 13,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.9),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        'Ver',
+                                        style: TextStyle(
                                           color: Colors.white
                                               .withValues(alpha: 0.9),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.2,
                                         ),
-                                        const SizedBox(width: 5),
-                                        Text(
-                                          'Ver',
-                                          style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.9),
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            letterSpacing: 0.2,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            product.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '\$${priceUsd.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              color: Colors.green,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            priceBs != null
-                                ? 'Bs. ${priceBs.toStringAsFixed(2)}'
-                                : 'Bs. --',
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
                   ],
                 ),

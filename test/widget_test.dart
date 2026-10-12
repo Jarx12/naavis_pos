@@ -20,6 +20,7 @@ import 'package:naavis_pos/features/checkout/presentation/checkout_screen.dart';
 import 'package:naavis_pos/features/checkout/presentation/pos_screen.dart';
 import 'package:naavis_pos/features/checkout/presentation/providers/cart_provider.dart';
 import 'package:naavis_pos/features/checkout/presentation/widgets/cart_panel.dart';
+import 'package:naavis_pos/features/checkout/presentation/widgets/product_image_viewer.dart';
 import 'package:naavis_pos/features/sync/data/sync_service.dart';
 
 /// Sync falsa para el POS: la UI ahora lee de la base local, así que el
@@ -754,18 +755,45 @@ void authErrorGroup() {
       );
       await tester.pumpAndSettle();
 
-      // El chip "Ver" vive sobre la imagen de la tarjeta…
+      // El chip "Ver" vive en la esquina de la TARJETA, fuera de la zona
+      // de la imagen: así nunca tapa la foto del producto.
       expect(find.text('Ver'), findsOneWidget);
+      final Rect imageRect = tester.getRect(find.byType(ProductImageCarousel));
+      final Rect chipRect = tester.getRect(find.text('Ver'));
+      expect(
+        chipRect.top,
+        greaterThanOrEqualTo(imageRect.bottom),
+        reason: 'el chip no debe pisar la imagen',
+      );
+
       await tester.tap(find.text('Ver'));
       await tester.pumpAndSettle();
 
-      // …y abre el visor con la imagen ampliable (sin abrir variantes).
-      expect(find.byType(Dialog), findsOneWidget);
+      // …y abre el visor minimalista con la imagen ampliable (sin abrir
+      // variantes): sin caja recuadrada ni cabecera con el nombre.
+      expect(find.byType(ProductImageViewer), findsOneWidget);
       expect(find.byType(InteractiveViewer), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ProductImageViewer),
+          matching: find.text('Producto de prueba'),
+        ),
+        findsNothing,
+      );
+
+      // El fondo es una capa oscura al 60 % de transparencia.
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is ModalBarrier &&
+              w.color == Colors.black.withValues(alpha: 0.6),
+        ),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byTooltip('Cerrar'));
       await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(ProductImageViewer), findsNothing);
       expect(find.byType(InteractiveViewer), findsNothing);
     });
 
@@ -794,7 +822,10 @@ void authErrorGroup() {
 
       await tester.tap(find.text('Ver'));
       await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(ProductImageViewer), findsOneWidget);
+
+      // El visor se sigue controlando con ✕ y con las flechas.
+      expect(find.byTooltip('Cerrar'), findsOneWidget);
 
       // En la primera imagen solo está la flecha de avanzar…
       expect(find.byTooltip('Imagen siguiente'), findsOneWidget);
@@ -808,15 +839,15 @@ void authErrorGroup() {
       // Tocar la imagen sin arrastrar cierra el visor.
       await tester.tap(find.byType(InteractiveViewer));
       await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(ProductImageViewer), findsNothing);
 
-      // El clic/tap fuera del diálogo (barrera) también lo cierra.
+      // El clic/tap sobre la capa oscura (barrier) también lo cierra.
       await tester.tap(find.text('Ver'));
       await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(ProductImageViewer), findsOneWidget);
       await tester.tapAt(const Offset(4, 4));
       await tester.pumpAndSettle();
-      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(ProductImageViewer), findsNothing);
     });
   });
 

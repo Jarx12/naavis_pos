@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/images/catalog_image_prefetcher.dart';
 import '../../catalog/data/local_catalog_repository.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import 'sync_repository.dart';
@@ -37,11 +40,18 @@ class SyncResult {
 ///   idempotentes).
 /// - Las corridas se serializan: si llega otra sync mientras hay una en
 ///   vuelo, se adhiere a la misma en vez de abrirla en paralelo.
+/// - Tras una sync exitosa se precachéan en segundo plano las fotos del
+///   catálogo ([CatalogImagePrefetcher]), sin bloquear el resultado.
 class SyncService {
   final SyncRepository _remote;
   final LocalCatalogRepository _local;
+  final CatalogImagePrefetcher? _imagePrefetcher;
 
-  SyncService(this._remote, this._local);
+  SyncService(
+    this._remote,
+    this._local, {
+    this._imagePrefetcher,
+  });
 
   Future<SyncResult>? _inflight;
 
@@ -73,6 +83,11 @@ class SyncService {
       if (newCursor.isNotEmpty) {
         await _local.saveCursor(newCursor);
       }
+      // Precachear en disco las fotos del catálogo, en segundo plano y a
+      // mayor esfuerzo: no bloquea el resultado de la sync ni la UI, y si
+      // algo falla (o la app se cierra a mitad de camino) la foto se
+      // descarga igual al mostrarse con CachedNetworkImage.
+      _scheduleImagePrefetch();
       return SyncResult.success(changed: changed);
     } on DioException catch (e) {
       // Sin respuesta HTTP = sin conexión (timeout de conexión, socket…).
@@ -81,6 +96,24 @@ class SyncService {
     } catch (e) {
       return SyncResult.error('Error inesperado al sincronizar: $e');
     }
+  }
+
+  /// Lee las URLs de las fotos del catálogo local y las manda a la caché
+  /// de disco SIN esperarlas. Se lee desde la DB (no solo desde las
+  /// páginas de esta corrida) para retomar un precache interrumpido
+  /// aunque el delta no traiga cambios de contenido; lo que ya esté
+  /// cacheado y vigente el gestor lo responde desde disco sin red.
+  void _scheduleImagePrefetch() {
+    final prefetcher = _imagePrefetcher;
+    if (prefetcher == null) return;
+    unawaited(() async {
+      try {
+        final urls = await _local.getImageUrls();
+        if (urls.isNotEmpty) await prefetcher.prefetch(urls);
+      } catch (_) {
+        // Mejor esfuerzo: nunca debe hacer fallar la sync ni la UI.
+      }
+    }());
   }
 
   static String _serverMessage(DioException e) {
@@ -97,5 +130,6 @@ final syncServiceProvider = Provider<SyncService>((ref) {
   return SyncService(
     SyncRepository(dio),
     ref.watch(localCatalogProvider),
+    imagePrefetcher: CatalogImagePrefetcher(),
   );
 });

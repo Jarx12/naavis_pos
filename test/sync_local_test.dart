@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:naavis_pos/core/db/app_database.dart';
+import 'package:naavis_pos/core/images/catalog_image_prefetcher.dart';
 import 'package:naavis_pos/features/catalog/data/local_catalog_repository.dart';
 import 'package:naavis_pos/features/sync/data/sync_models.dart';
 import 'package:naavis_pos/features/sync/data/sync_repository.dart';
@@ -47,11 +50,25 @@ SyncPage _page({
   );
 }
 
+/// Precachéador de mentira: no toca disco ni red; registra los lotes que
+/// la sync le manda y avisa la primera vez que es llamado.
+class _RecordingPrefetcher extends CatalogImagePrefetcher {
+  final List<List<String>> batches = [];
+  final Completer<void> called = Completer<void>();
+
+  @override
+  Future<void> prefetch(Iterable<String> urls) async {
+    batches.add(urls.toList());
+    if (!called.isCompleted) called.complete();
+  }
+}
+
 Map<String, dynamic> _product({
   int id = 1,
   String name = 'Café',
   bool isVisible = true,
   int stock = 5,
+  String imageUrl = '/media/x.jpg',
   List<Map<String, dynamic>> categories = const [
     {'id': 1, 'name': 'Bebidas'}
   ],
@@ -78,7 +95,7 @@ Map<String, dynamic> _product({
     'images': [
       {
         'id': id * 1000,
-        'image_url': '/media/x.jpg',
+        'image_url': imageUrl,
         'thumbnail_url': null,
         'is_main': true,
       }
@@ -266,6 +283,115 @@ void main() {
       expect(result.ok, isFalse);
       expect(result.offline, isTrue);
       expect((await local.readSyncState()).serverTime, 'T1');
+    });
+  });
+
+  group('SyncService prefetch de imágenes', () {
+    test('seed exitoso precachéa las fotos del catálogo en segundo plano',
+        () async {
+      final remote = _FakeRemote([
+        _page(serverTime: 'T1', products: [_product()]),
+      ]);
+      final prefetcher = _RecordingPrefetcher();
+
+      final result = await SyncService(
+        remote,
+        local,
+        imagePrefetcher: prefetcher,
+      ).sync();
+
+      expect(result.ok, isTrue);
+      // El prefetch corre en segundo plano: esperarlo sin bloquear la sync.
+      // Llegan las URLs CRUDAS de la DB; la normalización a absolutas y la
+      // descarga las hace el prefetcher real (cubiertas en el grupo
+      // 'CatalogImagePrefetcher' de abajo).
+      await prefetcher.called.future.timeout(const Duration(seconds: 5));
+      expect(prefetcher.batches.single, ['/media/x.jpg']);
+    });
+
+    test('delta sin cambios también retoma el precache (mejor esfuerzo)',
+        () async {
+      await SyncService(_FakeRemote([
+        _page(serverTime: 'T1', products: [_product()]),
+      ]), local).sync(); // sync anterior, sin prefetcher
+
+      final prefetcher = _RecordingPrefetcher();
+      final delta = _FakeRemote([_page(serverTime: 'T2')]);
+      final result = await SyncService(
+        delta,
+        local,
+        imagePrefetcher: prefetcher,
+      ).sync();
+
+      expect(result.ok, isTrue);
+      expect(result.changed, isFalse);
+      await prefetcher.called.future.timeout(const Duration(seconds: 5));
+      expect(prefetcher.batches.single, ['/media/x.jpg']);
+    });
+
+    test('sync offline no dispara el prefetch', () async {
+      final prefetcher = _RecordingPrefetcher();
+      final offline = _FakeRemote([_page(serverTime: 'T1')])
+        ..failure = DioException.connectionError(
+          requestOptions: RequestOptions(path: '/sync/catalog'),
+          reason: 'sin red',
+        );
+
+      final result = await SyncService(
+        offline,
+        local,
+        imagePrefetcher: prefetcher,
+      ).sync();
+
+      expect(result.offline, isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(prefetcher.batches, isEmpty);
+    });
+  });
+
+  group('CatalogImagePrefetcher', () {
+    const base = 'https://pos.example.com/api/v1';
+
+    test('absoluteImageUrl resuelve relativas contra el origin del baseUrl',
+        () {
+      expect(
+        CatalogImagePrefetcher.absoluteImageUrl('/media/a.jpg', baseUrl: base),
+        'https://pos.example.com/media/a.jpg',
+      );
+      expect(
+        CatalogImagePrefetcher.absoluteImageUrl(
+          '/media/a.jpg',
+          baseUrl: 'http://127.0.0.1:8000/api/v1',
+        ),
+        'http://127.0.0.1:8000/media/a.jpg',
+      );
+    });
+
+    test('absoluteImageUrl deja pasar las absolutas y las vacías', () {
+      expect(
+        CatalogImagePrefetcher.absoluteImageUrl(
+          'https://cdn.example.com/a.jpg',
+          baseUrl: base,
+        ),
+        'https://cdn.example.com/a.jpg',
+      );
+      expect(CatalogImagePrefetcher.absoluteImageUrl('', baseUrl: base), '');
+    });
+
+    test('normalize deduplica, normaliza y descarta vacías', () {
+      final prefetcher = CatalogImagePrefetcher();
+      expect(
+        prefetcher.normalize([
+          '/media/a.jpg',
+          '/media/a.jpg',
+          '',
+          'https://cdn.example.com/b.jpg',
+        ]),
+        [
+          CatalogImagePrefetcher.absoluteImageUrl('/media/a.jpg'),
+          'https://cdn.example.com/b.jpg',
+        ],
+      );
     });
   });
 }
