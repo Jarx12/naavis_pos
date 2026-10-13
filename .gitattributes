@@ -1,0 +1,6 @@
+# Artifactos precompilados de dependencias (no son código del proyecto):
+# drift compila su worker con dart2js y lo distribuye como asset estático
+# que la app debe servir junto a sqlite3.wasm. Excluirlo de las stats de
+# lenguaje de GitHub para que el repo se lea como el proyecto Dart que es.
+web/drift_worker.js linguist-vendored
+web/sqlite3.wasm linguist-generated

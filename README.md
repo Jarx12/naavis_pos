@@ -51,7 +51,9 @@ Dos capas, una por plataforma:
   visor usa el original a tamaño completo para el zoom.
 - **Web (PWA)**: las imágenes usan `Image.network` (sin
   `cached_network_image`, que no cachea en web); el navegador cachea
-  `/media/` según las cabeceras de nginx.
+  `/media/` según las cabeceras de nginx. En WebKit (Safari/iOS) se omite
+  el `cacheWidth` de la tarjeta: `createImageBitmap` con resize está roto
+  allí (webkit.org/b/202458) y ciertas fotos no cargaban.
 
 
 ### Comandos

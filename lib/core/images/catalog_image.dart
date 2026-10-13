@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../platform/browser_engine.dart';
 import 'pos_image_cache.dart';
 
 /// Imagen del catálogo con la estrategia de caché correcta por plataforma:
@@ -20,6 +21,14 @@ import 'pos_image_cache.dart';
 /// [useDiskCache] solo existe para tests: con `false` se fuerza la rama de
 /// red también en nativo (el FakeAsync de los widget tests nunca completa
 /// el I/O del gestor en disco).
+///
+/// En web, [memCacheWidth] se OMITE sobre WebKit (Safari y todos los
+/// navegadores de iOS): `createImageBitmap` con opciones de resize está
+/// roto en WebKit (webkit.org/b/202458, abierto desde 2019) y con
+/// `cacheWidth` ciertas fotos no cargan en la tarjeta aunque el mismo URL
+/// se vea perfecto en el visor (que decodifica a tamaño natural). El
+/// decode a tamaño natural lo limita el `ImageCache` de Flutter (~100 MB)
+/// igual que en el resto de la app.
 class CatalogImage extends StatelessWidget {
   final String imageUrl;
   final BoxFit fit;
@@ -56,7 +65,10 @@ class CatalogImage extends StatelessWidget {
     return Image.network(
       imageUrl,
       fit: fit,
-      cacheWidth: memCacheWidth,
+      // WebKit no implementa bien `createImageBitmap` con resize
+      // (webkit.org/b/202458): ver doc de la clase. El resto de
+      // navegadores conservan el decode a 600px de ancho.
+      cacheWidth: isWebKitEngine() ? null : memCacheWidth,
       loadingBuilder: (context, child, progress) =>
           progress == null ? child : placeholder(context, imageUrl),
       errorBuilder: (context, error, stackTrace) =>
