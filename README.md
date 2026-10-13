@@ -29,7 +29,13 @@ El POS funciona con **caché local + delta sync** sobre el endpoint
 
 ### Web (PWA)
 
-La base en web usa WASM: `web/sqlite3.wasm` y `web/drift_worker.js`
+La base en web usa WASM: `web/sqlite3.wasm` y `web/drift_worker.js`.
+Antes de arrancar, `main()` valida que el navegador pueda compilar ese
+wasm (`core/db/drift_web_gate.dart`: probe sintético de `extended-const`
++ una vez `WebAssembly.validate` del binario real). Los navegadores que
+no puedan — abren un modo **online-only**: catálogo solo en memoria
+(seed completo por sesión) y carrito/cola de órdenes/cachés en
+`localStorage`. El cliente nativo siempre usa drift con offline completo.
 
 ### Caché de imágenes
 

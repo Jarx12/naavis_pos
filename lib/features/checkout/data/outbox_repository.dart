@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/app_database.dart';
 import '../../../core/db/app_providers.dart';
+import 'prefs_outbox_repository.dart';
 
 /// La fila se reenviará sola (red volvió, 5xx, 429…).
 const outboxStatusPending = 'pending';
@@ -80,8 +82,37 @@ class OutboxRow {
   }
 }
 
+/// Acceso a la cola de órdenes fuera de línea. Dos implementaciones:
+/// - [OutboxRepository] (Drift): nativo y web con wasm compatible.
+/// - `PrefsOutboxRepository`: navegadores viejos, JSON en `localStorage`.
+abstract class OutboxSource {
+  Future<int> enqueue({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  });
+
+  Future<OutboxRow?> getById(int localId);
+
+  Future<List<OutboxRow>> listByStatus(String status);
+
+  Future<void> markAttention(
+    int localId, {
+    required String? code,
+    required String message,
+    String? detailsJson,
+  });
+
+  Future<void> bumpAttempt(int localId);
+
+  Future<void> resetForRetry(int localId, {String? payloadJson});
+
+  Future<void> delete(int localId);
+
+  Stream<List<OutboxRow>> watchAll();
+}
+
 /// Acceso a la tabla `outbox_orders`.
-class OutboxRepository {
+class OutboxRepository implements OutboxSource {
   final AppDatabase _db;
 
   OutboxRepository(this._db);
@@ -99,6 +130,7 @@ class OutboxRepository {
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
+  @override
   Future<int> enqueue({
     required String idempotencyKey,
     required Map<String, dynamic> payload,
@@ -113,6 +145,7 @@ class OutboxRepository {
         ));
   }
 
+  @override
   Future<OutboxRow?> getById(int localId) async {
     final data = await (_db.select(_db.outboxOrders)
           ..where((t) => t.localId.equals(localId)))
@@ -120,6 +153,7 @@ class OutboxRepository {
     return data == null ? null : OutboxRow.fromData(data);
   }
 
+  @override
   Future<List<OutboxRow>> listByStatus(String status) async {
     final rows = await (_db.select(_db.outboxOrders)
           ..where((t) => t.status.equals(status))
@@ -128,6 +162,7 @@ class OutboxRepository {
     return rows.map(OutboxRow.fromData).toList();
   }
 
+  @override
   Future<void> markAttention(
     int localId, {
     required String? code,
@@ -144,6 +179,7 @@ class OutboxRepository {
     ));
   }
 
+  @override
   Future<void> bumpAttempt(int localId) async {
     final row = await (_db.select(_db.outboxOrders)
           ..where((t) => t.localId.equals(localId)))
@@ -157,6 +193,7 @@ class OutboxRepository {
   /// Edición del cajero: payload nuevo y vuelta a `pending` (se limpia el
   /// error). La clave idempotente NO cambia: si el primer intento no llegó
   /// a crear la orden (409), reusarla es seguro.
+  @override
   Future<void> resetForRetry(int localId, {String? payloadJson}) {
     return (_db.update(_db.outboxOrders)
           ..where((t) => t.localId.equals(localId)))
@@ -171,12 +208,14 @@ class OutboxRepository {
     ));
   }
 
+  @override
   Future<void> delete(int localId) {
     return (_db.delete(_db.outboxOrders)
           ..where((t) => t.localId.equals(localId)))
         .go();
   }
 
+  @override
   Stream<List<OutboxRow>> watchAll() {
     return (_db.select(_db.outboxOrders)
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
@@ -185,6 +224,10 @@ class OutboxRepository {
   }
 }
 
-final outboxRepositoryProvider = Provider<OutboxRepository>(
-  (ref) => OutboxRepository(ref.watch(appDatabaseProvider)),
-);
+final outboxRepositoryProvider = Provider<OutboxSource>((ref) {
+  // Navegador sin soporte del wasm de drift: cola en localStorage.
+  if (kIsWeb && !ref.watch(driftStorageAvailableProvider)) {
+    return PrefsOutboxRepository();
+  }
+  return OutboxRepository(ref.watch(appDatabaseProvider));
+});

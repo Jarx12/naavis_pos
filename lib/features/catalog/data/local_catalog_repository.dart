@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/app_database.dart';
@@ -6,17 +7,8 @@ import '../../../core/db/app_providers.dart';
 import '../../sync/data/sync_models.dart';
 import '../domain/category_model.dart';
 import '../domain/product_model.dart';
-
-/// Estado de sincronización guardado (cursor).
-class SyncCursor {
-  /// `server_time` crudo de la primera página del último delta aplicado.
-  final String? serverTime;
-
-  /// true cuando ya existe al menos un seed/delta completo aplicado.
-  final bool seeded;
-
-  const SyncCursor({this.serverTime, this.seeded = false});
-}
+import 'catalog_local_source.dart';
+import 'in_memory_catalog_repository.dart';
 
 /// Acceso en LECTURA a la caché local del catálogo + aplicación de deltas.
 ///
@@ -28,13 +20,14 @@ class SyncCursor {
 ///   nombre fresco siempre lo aporta la colección `categories` top-level
 ///   del delta, que viene leída en el momento de la query.
 /// - Al borrar una categoría se purgan también sus joins.
-class LocalCatalogRepository {
+class LocalCatalogRepository implements CatalogLocalSource {
   final AppDatabase _db;
 
   LocalCatalogRepository(this._db);
 
   // ── Cursor ────────────────────────────────────────────────────────
 
+  @override
   Future<SyncCursor> readSyncState() async {
     final row = await (_db.select(_db.syncState)
           ..where((t) => t.id.equals(1)))
@@ -45,6 +38,7 @@ class LocalCatalogRepository {
     );
   }
 
+  @override
   Future<void> saveCursor(String serverTime) async {
     await _db.into(_db.syncState).insertOnConflictUpdate(
           SyncStateData(id: 1, serverTime: serverTime, seeded: true),
@@ -55,6 +49,7 @@ class LocalCatalogRepository {
 
   /// Aplica la página en una sola transacción. Devuelve true si hubo
   /// cambios de contenido (para que el llamador decida si invalida la UI).
+  @override
   Future<bool> applyPage(SyncPage page) async {
     if (!page.hasContent && page.serverTime.isEmpty) return false;
 
@@ -193,6 +188,7 @@ class LocalCatalogRepository {
   /// Todos los productos con sus hijos ya resueltos. Los `categories` del
   /// modelo se arman con el JOIN a la tabla `categories` (nombres frescos),
   /// nunca con la copia embebida del payload.
+  @override
   Future<List<ProductDetailOut>> getProducts() async {
     final productRows = await (_db.select(_db.products)
           ..orderBy([(t) => OrderingTerm.asc(t.id)]))
@@ -260,6 +256,7 @@ class LocalCatalogRepository {
     ];
   }
 
+  @override
   Future<List<CategoryOut>> getCategories() async {
     final rows = await (_db.select(_db.categories)
           ..orderBy([(t) => OrderingTerm.asc(t.id)]))
@@ -272,6 +269,7 @@ class LocalCatalogRepository {
   /// caché de disco: leer desde la DB (y no solo desde las páginas del
   /// delta) permite retomar un precache interrumpido aunque la próxima
   /// sync no traiga cambios de contenido.
+  @override
   Future<List<String>> getImageUrls() async {
     final rows = await _db.select(_db.productImages).get();
     return [
@@ -281,6 +279,7 @@ class LocalCatalogRepository {
   }
 
   /// Etiqueta y stock local de una variación (diálogo de conflicto de stock).
+  @override
   Future<({String label, int stock})?> getVariationInfo(
       int variationId) async {
     final query = _db.select(_db.variations).join([
@@ -301,6 +300,11 @@ class LocalCatalogRepository {
       v is double ? v : (v is num ? v.toDouble() : null);
 }
 
-final localCatalogProvider = Provider<LocalCatalogRepository>(
-  (ref) => LocalCatalogRepository(ref.watch(appDatabaseProvider)),
-);
+final localCatalogProvider = Provider<CatalogLocalSource>((ref) {
+  // Navegador sin soporte del wasm de drift: catálogo solo en memoria
+  // (modo online-only; ver core/db/drift_web_gate.dart).
+  if (kIsWeb && !ref.watch(driftStorageAvailableProvider)) {
+    return InMemoryCatalogRepository();
+  }
+  return LocalCatalogRepository(ref.watch(appDatabaseProvider));
+});

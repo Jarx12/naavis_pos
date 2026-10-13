@@ -1,16 +1,28 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/app_database.dart';
 import '../../../core/db/app_providers.dart';
 import '../domain/cart_item_model.dart';
+import 'prefs_cart_store.dart';
+
+/// Persistencia del carrito. Dos implementaciones:
+/// - [CartStore] (Drift): nativo y web con wasm compatible.
+/// - [PrefsCartStore]: navegadores viejos, JSON en `localStorage`.
+abstract class CartPersistence {
+  Future<List<CartItem>> load();
+
+  Future<void> saveAll(List<CartItem> items);
+}
 
 /// Persistencia del carrito en la base local: sobrevive a reinicios y
 /// cortes de red. La escritura es replace-all (el carrito es chico).
-class CartStore {
+class CartStore implements CartPersistence {
   final AppDatabase _db;
 
   CartStore(this._db);
 
+  @override
   Future<List<CartItem>> load() async {
     final rows = await _db.select(_db.cartRows).get();
     return [
@@ -25,6 +37,7 @@ class CartStore {
     ];
   }
 
+  @override
   Future<void> saveAll(List<CartItem> items) async {
     await _db.transaction(() async {
       await _db.delete(_db.cartRows).go();
@@ -43,6 +56,10 @@ class CartStore {
   }
 }
 
-final cartStoreProvider = Provider<CartStore>(
-  (ref) => CartStore(ref.watch(appDatabaseProvider)),
-);
+final cartStoreProvider = Provider<CartPersistence>((ref) {
+  // Navegador sin soporte del wasm de drift: carrito en localStorage.
+  if (kIsWeb && !ref.watch(driftStorageAvailableProvider)) {
+    return PrefsCartStore();
+  }
+  return CartStore(ref.watch(appDatabaseProvider));
+});

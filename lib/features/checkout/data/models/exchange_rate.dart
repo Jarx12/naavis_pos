@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/db/app_providers.dart';
 import '../../../../core/db/settings_store.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
@@ -49,8 +48,7 @@ const String _rateCacheKey = 'exchange_rate_cache';
 class ExchangeRateNotifier extends AsyncNotifier<ExchangeRate> {
   @override
   Future<ExchangeRate> build() async {
-    final db = ref.read(appDatabaseProvider);
-    final settings = SettingsStore(db);
+    final settings = ref.watch(settingsStoreProvider);
     final cached = await _readCache(settings);
 
     if (cached != null) {
@@ -60,7 +58,7 @@ class ExchangeRateNotifier extends AsyncNotifier<ExchangeRate> {
     return _fetch(settings);
   }
 
-  Future<ExchangeRate?> _readCache(SettingsStore settings) async {
+  Future<ExchangeRate?> _readCache(KeyValueStore settings) async {
     try {
       final raw = await settings.get(_rateCacheKey);
       if (raw == null) return null;
@@ -70,7 +68,7 @@ class ExchangeRateNotifier extends AsyncNotifier<ExchangeRate> {
     }
   }
 
-  Future<ExchangeRate> _fetch(SettingsStore settings) async {
+  Future<ExchangeRate> _fetch(KeyValueStore settings) async {
     final dioClient = ref.read(dioClientProvider);
     final response = await dioClient.dio.get('/exchange-rate/current');
     final rate = ExchangeRate.fromJson(response.data as Map<String, dynamic>);
@@ -82,7 +80,7 @@ class ExchangeRateNotifier extends AsyncNotifier<ExchangeRate> {
     return rate;
   }
 
-  Future<void> _refreshInBackground(SettingsStore settings) async {
+  Future<void> _refreshInBackground(KeyValueStore settings) async {
     try {
       final fresh = await _fetch(settings);
       if (ref.mounted) state = AsyncData(fresh);

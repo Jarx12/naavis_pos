@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/images/catalog_image_prefetcher.dart';
+import '../../catalog/data/catalog_local_source.dart';
 import '../../catalog/data/local_catalog_repository.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import 'sync_repository.dart';
@@ -44,7 +45,7 @@ class SyncResult {
 ///   catálogo ([CatalogImagePrefetcher]), sin bloquear el resultado.
 class SyncService {
   final SyncRepository _remote;
-  final LocalCatalogRepository _local;
+  final CatalogLocalSource _local;
   final CatalogImagePrefetcher? _imagePrefetcher;
 
   SyncService(

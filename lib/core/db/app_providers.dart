@@ -10,3 +10,11 @@ final appDatabaseProvider = Provider<AppDatabase>((ref) {
   ref.onDispose(db.close);
   return db;
 });
+
+/// true = el almacenamiento local es Drift (nativo, o web con navegador que
+/// compila `sqlite3.wasm`); false = modo respaldo online-only en web
+/// (carrito/outbox en `localStorage`, catálogo solo en memoria).
+///
+/// Se decide en `main()` con el probe de `drift_web_gate.dart` y se inyecta
+/// con un override; el default true no toca nada en nativo.
+final driftStorageAvailableProvider = Provider<bool>((ref) => true);

@@ -74,7 +74,7 @@ class OutboxEvent {
 /// rechaza por negocio, queda `attention` a merced del cajero.
 class OutboxService {
   final Dio _dio;
-  final OutboxRepository _repo;
+  final OutboxSource _repo;
   final void Function(OutboxEvent event)? onEvent;
   final void Function()? onOrderSent;
 
