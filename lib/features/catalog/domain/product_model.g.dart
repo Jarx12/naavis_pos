@@ -56,6 +56,11 @@ _ProductImageOut _$ProductImageOutFromJson(Map<String, dynamic> json) =>
       imageUrl: json['image_url'] as String,
       thumbnailUrl: json['thumbnail_url'] as String?,
       isMain: json['is_main'] as bool? ?? false,
+      variationIds:
+          (json['variation_ids'] as List<dynamic>?)
+              ?.map((e) => (e as num).toInt())
+              .toList() ??
+          const [],
     );
 
 Map<String, dynamic> _$ProductImageOutToJson(_ProductImageOut instance) =>
@@ -64,6 +69,7 @@ Map<String, dynamic> _$ProductImageOutToJson(_ProductImageOut instance) =>
       'image_url': instance.imageUrl,
       'thumbnail_url': instance.thumbnailUrl,
       'is_main': instance.isMain,
+      'variation_ids': instance.variationIds,
     };
 
 _VariationOut _$VariationOutFromJson(Map<String, dynamic> json) =>

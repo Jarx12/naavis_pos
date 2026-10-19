@@ -409,9 +409,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // "cliente" es obligatorio: lo rellenamos para que el form valide.
+      // El nombre es opcional: lo rellenamos para comprobar que se envía.
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Nombre del cliente *'),
+        find.widgetWithText(TextFormField, 'Nombre del cliente'),
         'Ana',
       );
       await tester.pumpAndSettle();

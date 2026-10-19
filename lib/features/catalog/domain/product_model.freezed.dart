@@ -337,7 +337,7 @@ as List<ProductImageOut>,
 /// @nodoc
 mixin _$ProductImageOut {
 
- int get id;@JsonKey(name: 'image_url') String get imageUrl;@JsonKey(name: 'thumbnail_url') String? get thumbnailUrl;@JsonKey(name: 'is_main') bool get isMain;
+ int get id;@JsonKey(name: 'image_url') String get imageUrl;@JsonKey(name: 'thumbnail_url') String? get thumbnailUrl;@JsonKey(name: 'is_main') bool get isMain;@JsonKey(name: 'variation_ids') List<int> get variationIds;
 /// Create a copy of ProductImageOut
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -351,20 +351,20 @@ $ProductImageOutCopyWith<ProductImageOut> get copyWith => _$ProductImageOutCopyW
 @override
 bool operator ==(Object other) {
   final _this = this as ProductImageOut;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ProductImageOut&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.imageUrl, _this.imageUrl) || other.imageUrl == _this.imageUrl)&&(identical(other.thumbnailUrl, _this.thumbnailUrl) || other.thumbnailUrl == _this.thumbnailUrl)&&(identical(other.isMain, _this.isMain) || other.isMain == _this.isMain));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ProductImageOut&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.imageUrl, _this.imageUrl) || other.imageUrl == _this.imageUrl)&&(identical(other.thumbnailUrl, _this.thumbnailUrl) || other.thumbnailUrl == _this.thumbnailUrl)&&(identical(other.isMain, _this.isMain) || other.isMain == _this.isMain)&&const DeepCollectionEquality().equals(other.variationIds, _this.variationIds));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
 int get hashCode {
   final _this = this as ProductImageOut;
-  return Object.hash(runtimeType,_this.id,_this.imageUrl,_this.thumbnailUrl,_this.isMain);
+  return Object.hash(runtimeType,_this.id,_this.imageUrl,_this.thumbnailUrl,_this.isMain,const DeepCollectionEquality().hash(_this.variationIds));
 }
 
 @override
 String toString() {
   final _this = this as ProductImageOut;
-  return 'ProductImageOut(id: ${_this.id}, imageUrl: ${_this.imageUrl}, thumbnailUrl: ${_this.thumbnailUrl}, isMain: ${_this.isMain})';
+  return 'ProductImageOut(id: ${_this.id}, imageUrl: ${_this.imageUrl}, thumbnailUrl: ${_this.thumbnailUrl}, isMain: ${_this.isMain}, variationIds: ${_this.variationIds})';
 }
 
 
@@ -375,7 +375,7 @@ abstract mixin class $ProductImageOutCopyWith<$Res>  {
   factory $ProductImageOutCopyWith(ProductImageOut value, $Res Function(ProductImageOut) _then) = _$ProductImageOutCopyWithImpl;
 @useResult
 $Res call({
- int id,@JsonKey(name: 'image_url') String imageUrl,@JsonKey(name: 'thumbnail_url') String? thumbnailUrl,@JsonKey(name: 'is_main') bool isMain
+ int id,@JsonKey(name: 'image_url') String imageUrl,@JsonKey(name: 'thumbnail_url') String? thumbnailUrl,@JsonKey(name: 'is_main') bool isMain,@JsonKey(name: 'variation_ids') List<int> variationIds
 });
 
 
@@ -392,13 +392,14 @@ class _$ProductImageOutCopyWithImpl<$Res>
 
 /// Create a copy of ProductImageOut
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? imageUrl = null,Object? thumbnailUrl = freezed,Object? isMain = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? imageUrl = null,Object? thumbnailUrl = freezed,Object? isMain = null,Object? variationIds = null,}) {
   return _then(ProductImageOut(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as int,imageUrl: null == imageUrl ? _self.imageUrl : imageUrl // ignore: cast_nullable_to_non_nullable
 as String,thumbnailUrl: freezed == thumbnailUrl ? _self.thumbnailUrl : thumbnailUrl // ignore: cast_nullable_to_non_nullable
 as String?,isMain: null == isMain ? _self.isMain : isMain // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,variationIds: null == variationIds ? _self.variationIds : variationIds // ignore: cast_nullable_to_non_nullable
+as List<int>,
   ));
 }
 
@@ -483,10 +484,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int id, @JsonKey(name: 'image_url')  String imageUrl, @JsonKey(name: 'thumbnail_url')  String? thumbnailUrl, @JsonKey(name: 'is_main')  bool isMain)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int id, @JsonKey(name: 'image_url')  String imageUrl, @JsonKey(name: 'thumbnail_url')  String? thumbnailUrl, @JsonKey(name: 'is_main')  bool isMain, @JsonKey(name: 'variation_ids')  List<int> variationIds)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ProductImageOut() when $default != null:
-return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain);case _:
+return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain,_that.variationIds);case _:
   return orElse();
 
 }
@@ -504,10 +505,10 @@ return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int id, @JsonKey(name: 'image_url')  String imageUrl, @JsonKey(name: 'thumbnail_url')  String? thumbnailUrl, @JsonKey(name: 'is_main')  bool isMain)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int id, @JsonKey(name: 'image_url')  String imageUrl, @JsonKey(name: 'thumbnail_url')  String? thumbnailUrl, @JsonKey(name: 'is_main')  bool isMain, @JsonKey(name: 'variation_ids')  List<int> variationIds)  $default,) {final _that = this;
 switch (_that) {
 case _ProductImageOut():
-return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain);case _:
+return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain,_that.variationIds);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -524,10 +525,10 @@ return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int id, @JsonKey(name: 'image_url')  String imageUrl, @JsonKey(name: 'thumbnail_url')  String? thumbnailUrl, @JsonKey(name: 'is_main')  bool isMain)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int id, @JsonKey(name: 'image_url')  String imageUrl, @JsonKey(name: 'thumbnail_url')  String? thumbnailUrl, @JsonKey(name: 'is_main')  bool isMain, @JsonKey(name: 'variation_ids')  List<int> variationIds)?  $default,) {final _that = this;
 switch (_that) {
 case _ProductImageOut() when $default != null:
-return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain);case _:
+return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain,_that.variationIds);case _:
   return null;
 
 }
@@ -539,13 +540,20 @@ return $default(_that.id,_that.imageUrl,_that.thumbnailUrl,_that.isMain);case _:
 @JsonSerializable()
 
 class _ProductImageOut implements ProductImageOut {
-  const _ProductImageOut({required this.id, @JsonKey(name: 'image_url') required this.imageUrl, @JsonKey(name: 'thumbnail_url') this.thumbnailUrl, @JsonKey(name: 'is_main') this.isMain = false});
+  const _ProductImageOut({required this.id, @JsonKey(name: 'image_url') required this.imageUrl, @JsonKey(name: 'thumbnail_url') this.thumbnailUrl, @JsonKey(name: 'is_main') this.isMain = false, @JsonKey(name: 'variation_ids')  List<int> variationIds = const []}): _variationIds = variationIds;
   factory _ProductImageOut.fromJson(Map<String, dynamic> json) => _$ProductImageOutFromJson(json);
 
 @override final  int id;
 @override@JsonKey(name: 'image_url') final  String imageUrl;
 @override@JsonKey(name: 'thumbnail_url') final  String? thumbnailUrl;
 @override@JsonKey(name: 'is_main') final  bool isMain;
+ final  List<int> _variationIds;
+@override@JsonKey(name: 'variation_ids') List<int> get variationIds {
+  if (_variationIds is EqualUnmodifiableListView) return _variationIds;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_variationIds);
+}
+
 
 /// Create a copy of ProductImageOut
 /// with the given fields replaced by the non-null parameter values.
@@ -560,18 +568,18 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _ProductImageOut&&(identical(other.id, id) || other.id == id)&&(identical(other.imageUrl, imageUrl) || other.imageUrl == imageUrl)&&(identical(other.thumbnailUrl, thumbnailUrl) || other.thumbnailUrl == thumbnailUrl)&&(identical(other.isMain, isMain) || other.isMain == isMain));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _ProductImageOut&&(identical(other.id, id) || other.id == id)&&(identical(other.imageUrl, imageUrl) || other.imageUrl == imageUrl)&&(identical(other.thumbnailUrl, thumbnailUrl) || other.thumbnailUrl == thumbnailUrl)&&(identical(other.isMain, isMain) || other.isMain == isMain)&&const DeepCollectionEquality().equals(other.variationIds, _variationIds));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
 int get hashCode {
-    return Object.hash(runtimeType,id,imageUrl,thumbnailUrl,isMain);
+    return Object.hash(runtimeType,id,imageUrl,thumbnailUrl,isMain,const DeepCollectionEquality().hash(_variationIds));
 }
 
 @override
 String toString() {
-    return 'ProductImageOut(id: $id, imageUrl: $imageUrl, thumbnailUrl: $thumbnailUrl, isMain: $isMain)';
+    return 'ProductImageOut(id: $id, imageUrl: $imageUrl, thumbnailUrl: $thumbnailUrl, isMain: $isMain, variationIds: $variationIds)';
 }
 
 
@@ -582,7 +590,7 @@ abstract mixin class _$ProductImageOutCopyWith<$Res> implements $ProductImageOut
   factory _$ProductImageOutCopyWith(_ProductImageOut value, $Res Function(_ProductImageOut) _then) = __$ProductImageOutCopyWithImpl;
 @override @useResult
 $Res call({
- int id,@JsonKey(name: 'image_url') String imageUrl,@JsonKey(name: 'thumbnail_url') String? thumbnailUrl,@JsonKey(name: 'is_main') bool isMain
+ int id,@JsonKey(name: 'image_url') String imageUrl,@JsonKey(name: 'thumbnail_url') String? thumbnailUrl,@JsonKey(name: 'is_main') bool isMain,@JsonKey(name: 'variation_ids') List<int> variationIds
 });
 
 
@@ -599,13 +607,14 @@ class __$ProductImageOutCopyWithImpl<$Res>
 
 /// Create a copy of ProductImageOut
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? imageUrl = null,Object? thumbnailUrl = freezed,Object? isMain = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? imageUrl = null,Object? thumbnailUrl = freezed,Object? isMain = null,Object? variationIds = null,}) {
   return _then(_ProductImageOut(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as int,imageUrl: null == imageUrl ? _self.imageUrl : imageUrl // ignore: cast_nullable_to_non_nullable
 as String,thumbnailUrl: freezed == thumbnailUrl ? _self.thumbnailUrl : thumbnailUrl // ignore: cast_nullable_to_non_nullable
 as String?,isMain: null == isMain ? _self.isMain : isMain // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,variationIds: null == variationIds ? _self._variationIds : variationIds // ignore: cast_nullable_to_non_nullable
+as List<int>,
   ));
 }
 

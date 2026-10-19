@@ -7,6 +7,9 @@ class CreateOrderIn {
   final double discountVolumen;
   final String? note;
   final List<OrderItemIn> items;
+  // Pago mixto: ≥2 partes en USD que suman el total (misma forma que el
+  // panel). Vacío = pedido de un solo método (payload de siempre).
+  final List<PaymentSplit> pagos;
 
   CreateOrderIn({
     required this.customerName,
@@ -17,6 +20,7 @@ class CreateOrderIn {
     this.discountVolumen = 0.0,
     this.note,
     required this.items,
+    this.pagos = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -28,7 +32,18 @@ class CreateOrderIn {
         'discount_volumen': discountVolumen,
         'note': (note != null && note!.trim().isNotEmpty) ? note : null,
         'items': items.map((e) => e.toJson()).toList(),
+        if (pagos.isNotEmpty) 'pagos': pagos.map((e) => e.toJson()).toList(),
       };
+}
+
+/// Parte de un pago mixto: `{"metodo": ..., "monto": ...}` en dólares.
+class PaymentSplit {
+  final String method;
+  final double amount;
+
+  PaymentSplit({required this.method, required this.amount});
+
+  Map<String, dynamic> toJson() => {'metodo': method, 'monto': amount};
 }
 
 class OrderItemIn {

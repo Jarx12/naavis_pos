@@ -57,6 +57,9 @@ abstract class ProductImageOut with _$ProductImageOut {
     @JsonKey(name: 'image_url') required String imageUrl,
     @JsonKey(name: 'thumbnail_url') String? thumbnailUrl,
     @JsonKey(name: 'is_main') @Default(false) bool isMain,
+    // Variantes a las que va asociada esta foto (API: `variation_ids`).
+    // Vacío = foto general del producto.
+    @JsonKey(name: 'variation_ids') @Default([]) List<int> variationIds,
   }) = _ProductImageOut;
 
   factory ProductImageOut.fromJson(Map<String, dynamic> json) =>

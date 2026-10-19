@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/connectivity_provider.dart';
 import '../data/models/create_order_dto.dart';
 import '../data/orders_repository.dart';
+import '../data/models/payments_config.dart';
 import 'widgets/rate_staleness_chip.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
@@ -54,6 +55,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   String _selectedPaymentMethod = 'PAGOMOVIL';
   bool _isSubmitting = false;
 
+  /// Filas del pago mixto: método + monto en dólares (se muestran cuando el
+  /// método elegido es MIXTO). El server exige ≥2 partes que sumen el total,
+  /// igual que el formulario de ventas del panel.
+  final List<_MixedPaymentRow> _mixedRows = [
+    _MixedPaymentRow(method: 'EFECTIVO_USD'),
+    _MixedPaymentRow(method: 'PAGOMOVIL'),
+  ];
+
+  /// Error de validación del pago mixto (se limpia al editar cualquier fila).
+  String? _mixedError;
+
   final List<Map<String, String>> _deliveryOptions = const [
     {'value': 'PICKUP', 'label': 'Retiro en Tienda (Pickup)'},
     {'value': 'DELIVERY', 'label': 'Delivery Local'},
@@ -66,12 +78,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     {'value': 'EFECTIVO_BS', 'label': 'Efectivo (Bs)'},
     {'value': 'BINANCE', 'label': 'Binance Pay'},
     {'value': 'PAYPAL', 'label': 'PayPal'},
+    {'value': 'MIXTO', 'label': 'Pago mixto (varios métodos)'},
   ];
 
-  bool get _requiresRef =>
-      _selectedPaymentMethod == 'PAGOMOVIL' ||
-      _selectedPaymentMethod == 'BINANCE' ||
-      _selectedPaymentMethod == 'PAYPAL';
+  /// Métodos que piden referencia de pago (en el mixto: si alguna parte los
+  /// usa, el campo —opcional— se muestra igual).
+  static const Set<String> _refMethods = {'PAGOMOVIL', 'BINANCE', 'PAYPAL'};
+
+  bool get _isMixedPayment => _selectedPaymentMethod == 'MIXTO';
+
+  bool get _requiresRef => _isMixedPayment
+      ? _mixedRows.any((row) => _refMethods.contains(row.method))
+      : _refMethods.contains(_selectedPaymentMethod);
 
   double get _volumenDiscount =>
       double.tryParse(_discountVolumenCtrl.text) ?? 0.0;
@@ -154,6 +172,208 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     );
   }
 
+  // ── Pago mixto ─────────────────────────────────────────────────────
+
+  double _rowAmount(_MixedPaymentRow row) =>
+      double.tryParse(row.amountCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
+
+  double get _mixedAssigned =>
+      _mixedRows.fold(0.0, (sum, row) => sum + _rowAmount(row));
+
+  static double _round2(double value) => (value * 100).roundToDouble() / 100;
+
+  /// Agrega una fila con lo que falta por asignar (como el panel).
+  void _addMixedRow() {
+    final falta = _round2(_calculatedTotal - _mixedAssigned);
+    setState(() {
+      _mixedRows.add(_MixedPaymentRow(
+        method: 'EFECTIVO_USD',
+        initialAmount: falta > 0 ? falta.toStringAsFixed(2) : '',
+      ));
+      _mixedError = null;
+    });
+  }
+
+  void _removeMixedRow(_MixedPaymentRow row) {
+    if (_mixedRows.length <= 2) return; // el server exige al menos dos
+    setState(() {
+      _mixedRows.remove(row);
+      row.dispose();
+      _mixedError = null;
+    });
+  }
+
+  /// Reglas del panel: ≥2 partes, cada monto > 0 y la suma debe cubrir el
+  /// total (tolerancia de $0.01). Devuelve el mensaje o null si está bien.
+  String? _validateMixedPayment() {
+    if (_mixedRows.length < 2) {
+      return 'Para un pago mixto agrega al menos dos métodos.';
+    }
+    double suma = 0;
+    for (final row in _mixedRows) {
+      final texto = row.amountCtrl.text.trim().replaceAll(',', '.');
+      final monto = texto.isEmpty ? null : double.tryParse(texto);
+      if (monto == null) return 'Escribe cuánto se pagó con cada método.';
+      if (monto <= 0) return 'Cada parte del pago debe ser mayor que cero.';
+      suma += monto;
+    }
+    suma = _round2(suma);
+    final total = _calculatedTotal;
+    if ((suma - total).abs() > 0.01) {
+      return 'El pago mixto suma \$${suma.toStringAsFixed(2)} y el total de '
+          'la venta es \$${total.toStringAsFixed(2)}: ajusta los montos para '
+          'que cubran el total.';
+    }
+    return null;
+  }
+
+  /// PayPal: el total (método único) o la suma de las partes PayPal del mixto.
+  double? get _paypalAmount {
+    if (_selectedPaymentMethod == 'PAYPAL') return _calculatedTotal;
+    if (!_isMixedPayment) return null;
+    double suma = 0;
+    for (final row in _mixedRows) {
+      if (row.method == 'PAYPAL') suma += _rowAmount(row);
+    }
+    return suma > 0 ? _round2(suma) : null;
+  }
+
+  /// Filas método + monto del pago mixto con el total asignado al costado.
+  Widget _buildMixedPaymentSection() {
+    final total = _calculatedTotal;
+    final asignado = _round2(_mixedAssigned);
+    final cuadra = (asignado - total).abs() <= 0.01;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final row in _mixedRows) _buildMixedRow(row),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _addMixedRow,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Agregar método',
+                  style: TextStyle(fontSize: 13)),
+            ),
+            const Spacer(),
+            Text(
+              'Asignado \$${asignado.toStringAsFixed(2)} de '
+              '\$${total.toStringAsFixed(2)}',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: cuadra ? Colors.teal : Colors.red,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMixedRow(_MixedPaymentRow row) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('mixed_method_${row.id}'),
+              initialValue: row.method,
+              isExpanded: true,
+              items: _paymentOptions
+                  .where((e) => e['value'] != 'MIXTO')
+                  .map((e) => DropdownMenuItem(
+                        value: e['value'],
+                        child: Text(e['label']!,
+                            overflow: TextOverflow.ellipsis),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() {
+                row.method = v!;
+                _mixedError = null;
+              }),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: TextFormField(
+              key: ValueKey('mixed_amount_${row.id}'),
+              controller: row.amountCtrl,
+              onTapOutside: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Monto (\$)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: (_) => setState(() => _mixedError = null),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            onPressed: _mixedRows.length <= 2
+                ? null
+                : () => _removeMixedRow(row),
+            icon: const Icon(Icons.close, size: 18),
+            tooltip: 'Quitar este método',
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// "El cliente envía por PayPal $X (incluye la comisión)": lo mismo que
+  /// muestra el panel, con la comisión de GET /payments/config.
+  Widget _buildPaypalCommissionNote() {
+    final amount = _paypalAmount;
+    final config = ref
+        .watch(paymentsConfigProvider)
+        .maybeWhen(data: (c) => c, orElse: () => null);
+    if (amount == null || config == null) return const SizedBox.shrink();
+
+    final gross = config.paypalGross(amount);
+    final pct = config.paypalCommissionPct;
+    final pctTexto =
+        pct == pct.roundToDouble() ? pct.round().toString() : '$pct';
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4D6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'El cliente envía por PayPal \$${gross.toStringAsFixed(2)}',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          Text(
+            'incluye la comisión $pctTexto% + '
+            '\$${config.paypalCommissionFixed.toStringAsFixed(2)}',
+            style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _validateCoupon() async {
     final code = _couponCodeCtrl.text.trim();
     if (code.isEmpty) return;
@@ -194,17 +414,44 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isSubmitting = true);
+    // Pago mixto: las partes deben cubrir el total ANTES de encolar nada.
+    String paymentMethod = _selectedPaymentMethod;
+    List<PaymentSplit> pagos = const [];
+    if (_isMixedPayment) {
+      final error = _validateMixedPayment();
+      if (error != null) {
+        setState(() => _mixedError = error);
+        return;
+      }
+      pagos = [
+        for (final row in _mixedRows)
+          PaymentSplit(method: row.method, amount: _round2(_rowAmount(row))),
+      ];
+      // Regla del panel y del server: el método del pedido es el de mayor
+      // monto; el reparto completo viaja en `pagos`.
+      paymentMethod =
+          pagos.reduce((a, b) => b.amount > a.amount ? b : a).method;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _mixedError = null;
+    });
+
+    // Sin nombre (o solo espacios): el POS cobra igual y manda un valor
+    // estable que el server también respeta.
+    final nombre = _customerNameCtrl.text.trim();
 
     final payload = CreateOrderIn(
-      customerName: _customerNameCtrl.text.trim(),
+      customerName: nombre.isEmpty ? 'Cliente Anonimo' : nombre,
       deliveryType: _selectedDeliveryType,
-      paymentMethod: _selectedPaymentMethod,
+      paymentMethod: paymentMethod,
       paymentRef: _paymentRefCtrl.text.trim(),
       couponCode: _couponCodeCtrl.text.trim(),
       discountVolumen: _volumenDiscount,
       note: _noteCtrl.text.trim(),
       items: widget.cartItems,
+      pagos: pagos,
     );
 
     try {
@@ -221,6 +468,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     _couponCodeCtrl.dispose();
     _discountVolumenCtrl.dispose();
     _noteCtrl.dispose();
+    for (final row in _mixedRows) {
+      row.dispose();
+    }
     super.dispose();
   }
 
@@ -276,13 +526,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           FocusManager.instance.primaryFocus?.unfocus(),
                       textInputAction: TextInputAction.next,
                       textCapitalization: TextCapitalization.words,
+                      // Opcional: sin nombre el pedido se envía como
+                      // "Cliente Anonimo" (lo decide el checkout y, como
+                      // respaldo, el server).
                       decoration: const InputDecoration(
-                        labelText: 'Nombre del cliente *',
+                        labelText: 'Nombre del cliente',
+                        hintText: 'Cliente Anonimo',
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.person),
                       ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Requerido' : null,
                     ),
                     const SizedBox(height: 16),
 
@@ -340,6 +592,24 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         prefixIcon: Icon(Icons.payment),
                       ),
                     ),
+
+                    // ── Pago mixto (varios métodos) ───────────────────
+                    if (_isMixedPayment) ...[
+                      const SizedBox(height: 12),
+                      _buildMixedPaymentSection(),
+                      if (_mixedError != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          _mixedError!,
+                          style:
+                              const TextStyle(fontSize: 12, color: Colors.red),
+                        ),
+                      ],
+                    ],
+
+                    // ── Comisión de PayPal (solo informativa) ─────────
+                    _buildPaypalCommissionNote(),
+
                     const SizedBox(height: 12),
 
                     // ── Referencia (si aplica) ────────────────────────
@@ -668,4 +938,21 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       ),
     );
   }
+}
+
+/// Fila del selector de pago mixto: un método + el monto pagado con él.
+class _MixedPaymentRow {
+  static int _seq = 0;
+
+  /// Identidad estable: los widgets se keyean por `id` para que al quitar
+  /// una fila los dropdowns y campos conserven su estado.
+  final int id = _seq++;
+
+  String method;
+  final TextEditingController amountCtrl;
+
+  _MixedPaymentRow({required this.method, String initialAmount = ''})
+      : amountCtrl = TextEditingController(text: initialAmount);
+
+  void dispose() => amountCtrl.dispose();
 }
