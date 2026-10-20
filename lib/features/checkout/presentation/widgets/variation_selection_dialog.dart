@@ -146,9 +146,6 @@ class VariationSelectionDialog extends ConsumerWidget {
                       clipBehavior: Clip.antiAlias,
                       children: [
                         Positioned.fill(child: square),
-                        if (!hasStock)
-                          const Positioned(
-                              top: 4, left: 4, child: _AgotadoBadge()),
                       ],
                     ),
                   ),
@@ -204,26 +201,4 @@ class VariationSelectionDialog extends ConsumerWidget {
       );
 }
 
-/// Mismo badge rojo "AGOTADO" que sobre la foto en la cuadrícula del POS.
-class _AgotadoBadge extends StatelessWidget {
-  const _AgotadoBadge();
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: const Text(
-        'AGOTADO',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 9,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-}

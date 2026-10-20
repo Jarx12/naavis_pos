@@ -203,7 +203,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     });
   }
 
-  /// Reglas del panel: ≥2 partes, cada monto > 0 y la suma debe cubrir el
+  /// Reglas: ≥2 partes, cada monto > 0 y la suma debe cubrir el
   /// total (tolerancia de $0.01). Devuelve el mensaje o null si está bien.
   String? _validateMixedPayment() {
     if (_mixedRows.length < 2) {

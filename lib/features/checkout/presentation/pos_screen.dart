@@ -77,7 +77,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('NaaviShop POS'),
+            title: const Text('NSHOP POS'),
             backgroundColor: Colors.indigo,
             foregroundColor: Colors.white,
             actions: [
@@ -192,7 +192,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     await ref.read(localCatalogProvider).clearSyncState();
     if (!mounted) return;
     await _refreshCatalog(context,
-        okMessage: 'Catálogo re-descargado completo');
+        okMessage: 'Catálogo actualizado');
   }
 
   /// Delta en segundo plano; refresca la grilla cuando termine.
@@ -230,7 +230,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
         } else {
           messenger.showSnackBar(SnackBar(
             content: Text(
-                '${event.errorMessage ?? 'Orden rechazada por el server.'} '
+                '${event.errorMessage ?? 'Orden rechazada por el servidor.'} '
                 'Ábrela desde "Órdenes fuera de línea" para editarla o '
                 'descartarla.'),
             backgroundColor: Colors.red,
@@ -244,7 +244,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   }
 
   /// Configuración del POS: switches de visualización (persistidos) y
-  /// mantenimiento de datos (re-seed completo del catálogo).
+  /// mantenimiento de datos (re-seed del catálogo).
   void _showDisplayOptionsDialog(BuildContext context) {
     showDialog<void>(
       context: context,
@@ -273,7 +273,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Productos agotados'),
                     subtitle: const Text(
-                        'Sin stock en ninguna variación (badge "AGOTADO")'),
+                        'Sin stock (badge "AGOTADO")'),
                     value: options.showOutOfStock,
                     onChanged: (v) {
                       notifier.setShowOutOfStock(v);
@@ -292,9 +292,9 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Descarga TODO el catálogo otra vez desde el server. '
-                      'Útil si el inventario o las fotos se ven '
-                      'desactualizados. No toca las ventas en cola.',
+                      'Descarga el catálogo completo desde el servidor. '
+                      'Usalo en caso de problemas con la actualización '
+                      'del inventario o las fotos.',
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ),
@@ -306,11 +306,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                         final confirm = await showDialog<bool>(
                           context: dialogContext,
                           builder: (ctx) => AlertDialog(
-                            title: const Text('Re-seed completo'),
+                            title: const Text('Limpiar Catalogo'),
                             content: const Text(
-                                'Se volverá a descargar TODO el catálogo '
-                                'desde el server (necesita conexión y puede '
-                                'tardar). No se pierden las ventas en cola. '
+                                'Se volverá a descargar el catálogo '
+                                'desde el servidor '
                                 '¿Continuar?'),
                             actions: [
                               TextButton(
@@ -326,14 +325,14 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                             ],
                           ),
                         );
-                        if (confirm != true) return;
+                        if (confirm != true || !mounted) return;
                         if (dialogContext.mounted) {
                           Navigator.pop(dialogContext);
                         }
                         await _reseedCatalog();
                       },
                       icon: const Icon(Icons.cloud_sync_outlined, size: 18),
-                      label: const Text('Re-seed completo del catálogo'),
+                      label: const Text('Descarga completa del catálogo'),
                     ),
                   ),
                 ],
@@ -357,7 +356,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Cerrar Sesión'),
         content: const Text(
-            '¿Estás seguro de que deseas salir del sistema POS?'),
+            '¿Está seguro de que desea cerrar sesión?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -767,7 +766,7 @@ class _ProductGrid extends ConsumerWidget {
               child: Text(
                 offline && products.isEmpty
                     ? 'Sin conexión y sin productos guardados en este '
-                        'equipo. Conéctate una vez para descargar el '
+                        'dispositivo. Conéctate a la red para descargar el '
                         'catálogo.'
                     : query.isEmpty && selectedCategory == null
                         ? (products.isEmpty
@@ -1204,7 +1203,7 @@ void openCheckoutModal(
                 messenger.showSnackBar(const SnackBar(
                   content: Text(
                       'Sin conexión: la orden quedó guardada y se enviará '
-                      'sola al reconectar.'),
+                      'automaticamente al reconectar.'),
                   backgroundColor: Colors.orange,
                   duration: Duration(seconds: 5),
                 ));
@@ -1218,8 +1217,8 @@ void openCheckoutModal(
                 } else {
                   messenger.showSnackBar(SnackBar(
                     content: Text(
-                        '${result.errorMessage ?? 'El server rechazó la orden.'} '
-                        'Ábrela desde "Órdenes fuera de línea" para editarla '
+                        '${result.errorMessage ?? 'El servidor rechazó la orden.'} '
+                        'Ingresa a "Órdenes fuera de línea" para editarla '
                         'o descartarla.'),
                     backgroundColor: Colors.red,
                     duration: const Duration(seconds: 6),

@@ -24,8 +24,7 @@ class InMemoryCatalogRepository implements CatalogLocalSource {
 
   @override
   Future<void> clearSyncState() async {
-    // Sin cursor persistido (y sin offline): aquí TODO seed es completo,
-    // no hay nada que limpiar.
+    // Sin cursor persistido (y sin offline) no hay nada que limpiar.
   }
 
   @override

@@ -298,7 +298,7 @@ void main() {
       expect(cursor.seeded, isFalse);
       expect(cursor.serverTime, isNull);
 
-      // Sin cursor, el SyncService re-descarga TODO (since = null) y los
+      // Sin cursor, el SyncService re-descarga por completo (since = null) y los
       // productos entrantes reemplazan los locales por upsert.
       final remote = _FakeRemote([
         _page(serverTime: 'T1', products: [_product()]),
