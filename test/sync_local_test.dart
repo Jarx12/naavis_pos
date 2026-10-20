@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:drift/drift.dart'
+    show OpeningDetails, QueryExecutor, QueryExecutorUser;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -69,6 +72,7 @@ Map<String, dynamic> _product({
   bool isVisible = true,
   int stock = 5,
   String imageUrl = '/media/x.jpg',
+  List<int> variationIds = const [],
   List<Map<String, dynamic>> categories = const [
     {'id': 1, 'name': 'Bebidas'}
   ],
@@ -98,9 +102,45 @@ Map<String, dynamic> _product({
         'image_url': imageUrl,
         'thumbnail_url': null,
         'is_main': true,
+        if (variationIds.isNotEmpty) 'variation_ids': variationIds,
       }
     ],
   };
+}
+
+/// Usuario mínimo para preparar un executor con el esquema v1 y
+/// `user_version = 1` SIN pasar por AppDatabase: el DDL vive en
+/// `beforeOpen` (documentado: dentro de ese callback las queries contra el
+/// executor se permiten) y el engine fija la versión al terminar.
+class _V1Seeder implements QueryExecutorUser {
+  const _V1Seeder();
+
+  @override
+  int get schemaVersion => 1;
+
+  @override
+  Future<void> beforeOpen(
+      QueryExecutor executor, OpeningDetails details) async {
+    // El executor especial de beforeOpen exige su propio ensureOpen antes
+    // de la primera query (drift lo hace solo en los callbacks del modelo
+    // de base de datos; aquí lo llamamos a mano).
+    await executor.ensureOpen(this);
+    // Solo las tablas que toca la migración v1→v2.
+    await executor.runCustom(
+        'CREATE TABLE product_images ('
+        'id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, '
+        'image_url TEXT, thumbnail_url TEXT, '
+        'is_main INTEGER NOT NULL DEFAULT 0)', []);
+    await executor.runCustom(
+        'CREATE TABLE sync_state (id INTEGER PRIMARY KEY, '
+        'server_time TEXT, seeded INTEGER NOT NULL DEFAULT 0)', []);
+    await executor.runCustom(
+        "INSERT INTO product_images (id, product_id, image_url, is_main) "
+        "VALUES (7, 1, '/media/x.jpg', 1)", []);
+    await executor.runCustom(
+        "INSERT INTO sync_state (id, server_time, seeded) "
+        "VALUES (1, 'T1', 1)", []);
+  }
 }
 
 void main() {
@@ -137,6 +177,32 @@ void main() {
 
       final cursor = await local.readSyncState();
       expect(cursor.seeded, isFalse); // saveCursor lo hace el SyncService
+    });
+
+    test('las imágenes persisten y devuelven sus variation_ids', () async {
+      await local.applyPage(_page(
+        serverTime: 'T1',
+        products: [_product(variationIds: [100])],
+        categories: [
+          {'id': 1, 'name': 'Bebidas'}
+        ],
+      ));
+
+      // Roundtrip por la caché local (drift): el diálogo de variantes lee
+      // de aquí, no del payload en crudo.
+      final p = (await local.getProducts()).single;
+      expect(p.images.single.variationIds, [100]);
+
+      // Un payload SIN asociación la deja vacía (reemplazo completo).
+      await local.applyPage(_page(
+        serverTime: 'T2',
+        products: [_product()],
+        categories: [
+          {'id': 1, 'name': 'Bebidas'}
+        ],
+      ));
+      final q = (await local.getProducts()).single;
+      expect(q.images.single.variationIds, isEmpty);
     });
 
     test('delta: reemplaza los hijos por completo', () async {
@@ -218,6 +284,63 @@ void main() {
         deletedProducts: [1],
       ));
       expect(await local.getProducts(), isEmpty);
+    });
+  });
+
+  group('clearSyncState (re-seed manual)', () {
+    test('limpia el cursor y la próxima sync pide el catálogo completo',
+        () async {
+      await local.saveCursor('T9');
+      expect((await local.readSyncState()).seeded, isTrue);
+
+      await local.clearSyncState();
+      final cursor = await local.readSyncState();
+      expect(cursor.seeded, isFalse);
+      expect(cursor.serverTime, isNull);
+
+      // Sin cursor, el SyncService re-descarga TODO (since = null) y los
+      // productos entrantes reemplazan los locales por upsert.
+      final remote = _FakeRemote([
+        _page(serverTime: 'T1', products: [_product()]),
+      ]);
+      final result = await SyncService(remote, local).sync();
+      expect(result.ok, isTrue);
+      expect(remote.requestedSinces.single, isNull);
+      expect((await local.readSyncState()).serverTime, 'T1');
+      expect(await local.getProducts(), hasLength(1));
+    });
+  });
+
+  group('Migración v1→v2 (variation_ids de las fotos)', () {
+    test('agrega la columna, conserva las fotos y limpia el cursor', () async {
+      final file = File(
+          '${Directory.systemTemp.path}/naavis_pos_v1_'
+          '${DateTime.now().microsecondsSinceEpoch}.db');
+      addTearDown(() async {
+        if (await file.exists()) await file.delete();
+      });
+
+      // 1) Fase v1: se prepara un executor crudo con el esquema antiguo y
+      //    se cierra dejando user_version = 1 en el archivo.
+      final v1 = NativeDatabase(file);
+      addTearDown(v1.close);
+      await v1.ensureOpen(const _V1Seeder());
+      await v1.close();
+
+      // 2) AppDatabase sobre el MISMO archivo: el primer acceso dispara el
+      //    onUpgrade(1 → 2) real de la MigrationStrategy.
+      final db = AppDatabase(NativeDatabase(file));
+      addTearDown(db.close);
+
+      final images = await db.select(db.productImages).get();
+      expect(images, hasLength(1)); // la foto v1 sobrevive
+      expect(images.single.variationIds, '[]'); // default de la columna nueva
+
+      // El cursor se limpia para forzar el re-seed del catálogo completo (el
+      // server no reenvía esos productos en un delta: su updated_at no cambió
+      // al asociar las fotos a las variantes).
+      final cursor = await db.select(db.syncState).get();
+      expect(cursor, isEmpty);
     });
   });
 

@@ -1377,6 +1377,18 @@ class $ProductImagesTable extends ProductImages
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _variationIdsMeta = const VerificationMeta(
+    'variationIds',
+  );
+  @override
+  late final GeneratedColumn<String> variationIds = GeneratedColumn<String>(
+    'variation_ids',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1384,6 +1396,7 @@ class $ProductImagesTable extends ProductImages
     imageUrl,
     thumbnailUrl,
     isMain,
+    variationIds,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1429,6 +1442,15 @@ class $ProductImagesTable extends ProductImages
         isMain.isAcceptableOrUnknown(data['is_main']!, _isMainMeta),
       );
     }
+    if (data.containsKey('variation_ids')) {
+      context.handle(
+        _variationIdsMeta,
+        variationIds.isAcceptableOrUnknown(
+          data['variation_ids']!,
+          _variationIdsMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1458,6 +1480,10 @@ class $ProductImagesTable extends ProductImages
         DriftSqlType.bool,
         data['${effectivePrefix}is_main'],
       )!,
+      variationIds: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}variation_ids'],
+      )!,
     );
   }
 
@@ -1473,12 +1499,17 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
   final String? imageUrl;
   final String? thumbnailUrl;
   final bool isMain;
+
+  /// Variantes asociadas a la foto como JSON "[452,453]" (API:
+  /// `variation_ids`). Vacío = foto general del producto.
+  final String variationIds;
   const ProductImage({
     required this.id,
     required this.productId,
     this.imageUrl,
     this.thumbnailUrl,
     required this.isMain,
+    required this.variationIds,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1492,6 +1523,7 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
       map['thumbnail_url'] = Variable<String>(thumbnailUrl);
     }
     map['is_main'] = Variable<bool>(isMain);
+    map['variation_ids'] = Variable<String>(variationIds);
     return map;
   }
 
@@ -1506,6 +1538,7 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
           ? const Value.absent()
           : Value(thumbnailUrl),
       isMain: Value(isMain),
+      variationIds: Value(variationIds),
     );
   }
 
@@ -1520,6 +1553,7 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
       imageUrl: serializer.fromJson<String?>(json['imageUrl']),
       thumbnailUrl: serializer.fromJson<String?>(json['thumbnailUrl']),
       isMain: serializer.fromJson<bool>(json['isMain']),
+      variationIds: serializer.fromJson<String>(json['variationIds']),
     );
   }
   @override
@@ -1531,6 +1565,7 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
       'imageUrl': serializer.toJson<String?>(imageUrl),
       'thumbnailUrl': serializer.toJson<String?>(thumbnailUrl),
       'isMain': serializer.toJson<bool>(isMain),
+      'variationIds': serializer.toJson<String>(variationIds),
     };
   }
 
@@ -1540,12 +1575,14 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
     Value<String?> imageUrl = const Value.absent(),
     Value<String?> thumbnailUrl = const Value.absent(),
     bool? isMain,
+    String? variationIds,
   }) => ProductImage(
     id: id ?? this.id,
     productId: productId ?? this.productId,
     imageUrl: imageUrl.present ? imageUrl.value : this.imageUrl,
     thumbnailUrl: thumbnailUrl.present ? thumbnailUrl.value : this.thumbnailUrl,
     isMain: isMain ?? this.isMain,
+    variationIds: variationIds ?? this.variationIds,
   );
   ProductImage copyWithCompanion(ProductImagesCompanion data) {
     return ProductImage(
@@ -1556,6 +1593,9 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
           ? data.thumbnailUrl.value
           : this.thumbnailUrl,
       isMain: data.isMain.present ? data.isMain.value : this.isMain,
+      variationIds: data.variationIds.present
+          ? data.variationIds.value
+          : this.variationIds,
     );
   }
 
@@ -1566,14 +1606,15 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
           ..write('productId: $productId, ')
           ..write('imageUrl: $imageUrl, ')
           ..write('thumbnailUrl: $thumbnailUrl, ')
-          ..write('isMain: $isMain')
+          ..write('isMain: $isMain, ')
+          ..write('variationIds: $variationIds')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode =>
-      Object.hash(id, productId, imageUrl, thumbnailUrl, isMain);
+      Object.hash(id, productId, imageUrl, thumbnailUrl, isMain, variationIds);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1582,7 +1623,8 @@ class ProductImage extends DataClass implements Insertable<ProductImage> {
           other.productId == this.productId &&
           other.imageUrl == this.imageUrl &&
           other.thumbnailUrl == this.thumbnailUrl &&
-          other.isMain == this.isMain);
+          other.isMain == this.isMain &&
+          other.variationIds == this.variationIds);
 }
 
 class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
@@ -1591,12 +1633,14 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
   final Value<String?> imageUrl;
   final Value<String?> thumbnailUrl;
   final Value<bool> isMain;
+  final Value<String> variationIds;
   const ProductImagesCompanion({
     this.id = const Value.absent(),
     this.productId = const Value.absent(),
     this.imageUrl = const Value.absent(),
     this.thumbnailUrl = const Value.absent(),
     this.isMain = const Value.absent(),
+    this.variationIds = const Value.absent(),
   });
   ProductImagesCompanion.insert({
     this.id = const Value.absent(),
@@ -1604,6 +1648,7 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
     this.imageUrl = const Value.absent(),
     this.thumbnailUrl = const Value.absent(),
     this.isMain = const Value.absent(),
+    this.variationIds = const Value.absent(),
   }) : productId = Value(productId);
   static Insertable<ProductImage> custom({
     Expression<int>? id,
@@ -1611,6 +1656,7 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
     Expression<String>? imageUrl,
     Expression<String>? thumbnailUrl,
     Expression<bool>? isMain,
+    Expression<String>? variationIds,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -1618,6 +1664,7 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
       if (imageUrl != null) 'image_url': imageUrl,
       if (thumbnailUrl != null) 'thumbnail_url': thumbnailUrl,
       if (isMain != null) 'is_main': isMain,
+      if (variationIds != null) 'variation_ids': variationIds,
     });
   }
 
@@ -1627,6 +1674,7 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
     Value<String?>? imageUrl,
     Value<String?>? thumbnailUrl,
     Value<bool>? isMain,
+    Value<String>? variationIds,
   }) {
     return ProductImagesCompanion(
       id: id ?? this.id,
@@ -1634,6 +1682,7 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
       imageUrl: imageUrl ?? this.imageUrl,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       isMain: isMain ?? this.isMain,
+      variationIds: variationIds ?? this.variationIds,
     );
   }
 
@@ -1655,6 +1704,9 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
     if (isMain.present) {
       map['is_main'] = Variable<bool>(isMain.value);
     }
+    if (variationIds.present) {
+      map['variation_ids'] = Variable<String>(variationIds.value);
+    }
     return map;
   }
 
@@ -1665,7 +1717,8 @@ class ProductImagesCompanion extends UpdateCompanion<ProductImage> {
           ..write('productId: $productId, ')
           ..write('imageUrl: $imageUrl, ')
           ..write('thumbnailUrl: $thumbnailUrl, ')
-          ..write('isMain: $isMain')
+          ..write('isMain: $isMain, ')
+          ..write('variationIds: $variationIds')
           ..write(')'))
         .toString();
   }
@@ -3875,6 +3928,7 @@ typedef $$ProductImagesTableCreateCompanionBuilder =
       Value<String?> imageUrl,
       Value<String?> thumbnailUrl,
       Value<bool> isMain,
+      Value<String> variationIds,
     });
 typedef $$ProductImagesTableUpdateCompanionBuilder =
     ProductImagesCompanion Function({
@@ -3883,6 +3937,7 @@ typedef $$ProductImagesTableUpdateCompanionBuilder =
       Value<String?> imageUrl,
       Value<String?> thumbnailUrl,
       Value<bool> isMain,
+      Value<String> variationIds,
     });
 
 class $$ProductImagesTableFilterComposer
@@ -3916,6 +3971,11 @@ class $$ProductImagesTableFilterComposer
 
   ColumnFilters<bool> get isMain => $composableBuilder(
     column: $table.isMain,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get variationIds => $composableBuilder(
+    column: $table.variationIds,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3953,6 +4013,11 @@ class $$ProductImagesTableOrderingComposer
     column: $table.isMain,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get variationIds => $composableBuilder(
+    column: $table.variationIds,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ProductImagesTableAnnotationComposer
@@ -3980,6 +4045,11 @@ class $$ProductImagesTableAnnotationComposer
 
   GeneratedColumn<bool> get isMain =>
       $composableBuilder(column: $table.isMain, builder: (column) => column);
+
+  GeneratedColumn<String> get variationIds => $composableBuilder(
+    column: $table.variationIds,
+    builder: (column) => column,
+  );
 }
 
 class $$ProductImagesTableTableManager
@@ -4018,12 +4088,14 @@ class $$ProductImagesTableTableManager
                 Value<String?> imageUrl = const Value.absent(),
                 Value<String?> thumbnailUrl = const Value.absent(),
                 Value<bool> isMain = const Value.absent(),
+                Value<String> variationIds = const Value.absent(),
               }) => ProductImagesCompanion(
                 id: id,
                 productId: productId,
                 imageUrl: imageUrl,
                 thumbnailUrl: thumbnailUrl,
                 isMain: isMain,
+                variationIds: variationIds,
               ),
           createCompanionCallback:
               ({
@@ -4032,12 +4104,14 @@ class $$ProductImagesTableTableManager
                 Value<String?> imageUrl = const Value.absent(),
                 Value<String?> thumbnailUrl = const Value.absent(),
                 Value<bool> isMain = const Value.absent(),
+                Value<String> variationIds = const Value.absent(),
               }) => ProductImagesCompanion.insert(
                 id: id,
                 productId: productId,
                 imageUrl: imageUrl,
                 thumbnailUrl: thumbnailUrl,
                 isMain: isMain,
+                variationIds: variationIds,
               ),
           withReferenceMapper: (p0) => p0
               .map(

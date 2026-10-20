@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import '../../../core/images/catalog_image.dart';
 import '../../../core/network/connectivity_provider.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
+import '../../catalog/data/local_catalog_repository.dart';
 import '../../catalog/presentation/providers/catalog_provider.dart';
 import '../../sync/data/sync_service.dart';
 import '../data/models/create_order_dto.dart';
@@ -142,7 +143,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   /// Sincroniza delta + tasa y refresca la UI. El catálogo local sirve
   /// aunque la falle: en ese caso se avisa y se siguen mostrando los
   /// datos guardados en este equipo.
-  Future<void> _refreshCatalog(BuildContext context) async {
+  Future<void> _refreshCatalog(BuildContext context,
+      {String okMessage = 'Catálogo actualizado'}) async {
     setState(() => _refreshing = true);
     try {
       final result = await ref.read(syncServiceProvider).sync();
@@ -157,9 +159,9 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       final messenger = ScaffoldMessenger.of(context);
       if (result.ok) {
         messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Catálogo actualizado'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(okMessage),
+            duration: const Duration(seconds: 2),
           ),
         );
       } else if (result.offline) {
@@ -180,6 +182,17 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
+  }
+
+  /// Re-seed manual (Configuración): borra el cursor de sync y descarga el
+  /// catálogo COMPLETO. No se borra la caché local: si no hay red se
+  /// conservan los datos y el cursor queda limpio, así el próximo intento
+  /// (o el arranque) pide el seed completo.
+  Future<void> _reseedCatalog() async {
+    await ref.read(localCatalogProvider).clearSyncState();
+    if (!mounted) return;
+    await _refreshCatalog(context,
+        okMessage: 'Catálogo re-descargado completo');
   }
 
   /// Delta en segundo plano; refresca la grilla cuando termine.
@@ -230,7 +243,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     }
   }
 
-  /// Dos switches: mostrar invisibles / mostrar agotados (persistidos).
+  /// Configuración del POS: switches de visualización (persistidos) y
+  /// mantenimiento de datos (re-seed completo del catálogo).
   void _showDisplayOptionsDialog(BuildContext context) {
     showDialog<void>(
       context: context,
@@ -240,7 +254,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             final options = ref.read(displayOptionsProvider);
             final notifier = ref.read(displayOptionsProvider.notifier);
             return AlertDialog(
-              title: const Text('Mostrar en la grilla'),
+              title: const Text('Configuración'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -265,6 +279,62 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                       notifier.setShowOutOfStock(v);
                       setLocal(() {});
                     },
+                  ),
+                  const Divider(height: 24),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Datos',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Descarga TODO el catálogo otra vez desde el server. '
+                      'Útil si el inventario o las fotos se ven '
+                      'desactualizados. No toca las ventas en cola.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: dialogContext,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Re-seed completo'),
+                            content: const Text(
+                                'Se volverá a descargar TODO el catálogo '
+                                'desde el server (necesita conexión y puede '
+                                'tardar). No se pierden las ventas en cola. '
+                                '¿Continuar?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancelar'),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.indigo),
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('Re-seed'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm != true) return;
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext);
+                        }
+                        await _reseedCatalog();
+                      },
+                      icon: const Icon(Icons.cloud_sync_outlined, size: 18),
+                      label: const Text('Re-seed completo del catálogo'),
+                    ),
                   ),
                 ],
               ),

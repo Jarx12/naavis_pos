@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,6 +45,11 @@ class LocalCatalogRepository implements CatalogLocalSource {
     await _db.into(_db.syncState).insertOnConflictUpdate(
           SyncStateData(id: 1, serverTime: serverTime, seeded: true),
         );
+  }
+
+  @override
+  Future<void> clearSyncState() async {
+    await (_db.delete(_db.syncState)..where((t) => t.id.equals(1))).go();
   }
 
   // ── Aplicar una página de sync ────────────────────────────────────
@@ -154,6 +161,7 @@ class LocalCatalogRepository implements CatalogLocalSource {
               imageUrl: imageUrl,
               thumbnailUrl: img['thumbnail_url']?.toString(),
               isMain: img['is_main'] as bool? ?? false,
+              variationIds: jsonEncode(_asIntList(img['variation_ids'])),
             ),
             mode: InsertMode.insertOrReplace,
           );
@@ -224,6 +232,7 @@ class LocalCatalogRepository implements CatalogLocalSource {
               imageUrl: url,
               thumbnailUrl: img.thumbnailUrl,
               isMain: img.isMain,
+              variationIds: _decodeIdList(img.variationIds),
             ),
           );
     }
@@ -298,6 +307,27 @@ class LocalCatalogRepository implements CatalogLocalSource {
       v is int ? v : (v is num ? v.toInt() : null);
   static double? _asDouble(dynamic v) =>
       v is double ? v : (v is num ? v.toDouble() : null);
+
+  /// Lista de ids desde el payload (`variation_ids`); malformada → vacía.
+  static List<int> _asIntList(dynamic v) {
+    if (v is! List) return const [];
+    final ids = <int>[];
+    for (final e in v) {
+      final id = _asInt(e);
+      if (id != null) ids.add(id);
+    }
+    return ids;
+  }
+
+  /// Columna JSON "[452,453]" → lista de ids (nula/corrupta → vacía).
+  static List<int> _decodeIdList(String? raw) {
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      return _asIntList(jsonDecode(raw));
+    } catch (_) {
+      return const [];
+    }
+  }
 }
 
 final localCatalogProvider = Provider<CatalogLocalSource>((ref) {

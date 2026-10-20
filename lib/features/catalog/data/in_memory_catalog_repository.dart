@@ -23,6 +23,12 @@ class InMemoryCatalogRepository implements CatalogLocalSource {
   Future<void> saveCursor(String serverTime) async {}
 
   @override
+  Future<void> clearSyncState() async {
+    // Sin cursor persistido (y sin offline): aquí TODO seed es completo,
+    // no hay nada que limpiar.
+  }
+
+  @override
   Future<bool> applyPage(SyncPage page) async {
     if (!page.hasContent && page.serverTime.isEmpty) return false;
 

@@ -28,6 +28,12 @@ abstract class CatalogLocalSource {
   /// Aplica la página; devuelve true si hubo cambios de contenido.
   Future<bool> applyPage(SyncPage page);
 
+  /// Borra el cursor de sync: la próxima corrida pide el catálogo COMPLETO
+  /// (re-seed manual desde Configuración). Los datos locales NO se borran:
+  /// el seed entrante los reemplaza por upsert, así que sin red se
+  /// conservan y el próximo intento (o el arranque) pide el seed completo.
+  Future<void> clearSyncState();
+
   Future<List<ProductDetailOut>> getProducts();
 
   Future<List<CategoryOut>> getCategories();

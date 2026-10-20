@@ -61,6 +61,10 @@ class ProductImages extends Table {
   TextColumn get thumbnailUrl => text().nullable()();
   BoolColumn get isMain => boolean().withDefault(const Constant(false))();
 
+  /// Variantes asociadas a la foto como JSON "[452,453]" (API:
+  /// `variation_ids`). Vacío = foto general del producto.
+  TextColumn get variationIds => text().withDefault(const Constant('[]'))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -153,5 +157,21 @@ class AppDatabase extends _$AppDatabase {
         );
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            // v2: la asociación foto↔variante se persiste por primera vez.
+            await m.addColumn(productImages, productImages.variationIds);
+            // El delta anterior guardó las fotos SIN esta asociación y el
+            // cursor ya avanzó (el server no reenvía ese producto hasta que
+            // cambie): se limpia el cursor para que el próximo arranque haga
+            // un seed completo y las imágenes vuelvan con sus variation_ids.
+            await delete(syncState).go();
+          }
+        },
+      );
 }
