@@ -96,8 +96,9 @@ void main() {
     expect(find.text('Madera'), findsOneWidget);
     // El botón por fila se retiró.
     expect(find.text('Agregar'), findsNothing);
-    // Indicadores de agotado: badge sobre el cuadro + texto de stock.
-    expect(find.text('AGOTADO'), findsOneWidget);
+    // El badge "AGOTADO" sobre el cuadro se retiró a propósito; el único
+    // indicador de agotado es el texto de stock.
+    expect(find.text('AGOTADO'), findsNothing);
     expect(find.text('Agotado'), findsOneWidget);
     expect(find.text('Stock disponible: 2'), findsOneWidget);
   });

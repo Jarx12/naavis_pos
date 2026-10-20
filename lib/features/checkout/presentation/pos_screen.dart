@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import '../../../core/images/catalog_image.dart';
 import '../../../core/network/connectivity_provider.dart';
+import '../../../core/utils/fuzzy_match.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import '../../catalog/data/local_catalog_repository.dart';
 import '../../catalog/presentation/providers/catalog_provider.dart';
@@ -739,10 +740,12 @@ class _ProductGrid extends ConsumerWidget {
 
           bool matchesQuery = true;
           if (query.isNotEmpty) {
-            final matchesName =
-                product.name.toLowerCase().contains(query);
+            // Búsqueda difusa: la subcadena exacta tiene prioridad y,
+            // si no pega, se toleran hasta 1-2 typos según el largo de
+            // la consulta (los códigos numéricos quedan exactos).
+            final matchesName = fuzzyMatch(query, product.name);
             final matchesVariation = product.variations.any(
-              (v) => v.variationType.toLowerCase().contains(query),
+              (v) => fuzzyMatch(query, v.variationType),
             );
             matchesQuery = matchesName || matchesVariation;
           }
